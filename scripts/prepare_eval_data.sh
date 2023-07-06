@@ -54,19 +54,23 @@ mkdir -p data/eval/creative_tasks
 wget -O data/eval/creative_tasks/self_instruct_test.jsonl https://github.com/yizhongw/self-instruct/raw/main/human_eval/user_oriented_instructions.jsonl
 wget -O data/eval/creative_tasks/vicuna_test.jsonl https://github.com/lm-sys/FastChat/raw/main/fastchat/eval/table/question.jsonl
 wget -O data/eval/creative_tasks/koala_test.jsonl https://github.com/arnav-gudibande/koala-test-set/raw/main/koala_test_set.jsonl
-# check openai api key
-if [ -z "$OPENAI_API_KEY" ]
-then
-    echo "Please set OPENAI_API_KEY in your environment variables in order to prepare the outputs for creative tasks."
-    exit 1
-fi
-python -m eval.creative_eval.get_gpt_outputs \
-    --engine gpt-3.5-turbo-0301 \
-    --input_files data/eval/creative_tasks/self_instruct_test.jsonl data/eval/creative_tasks/vicuna_test.jsonl data/eval/creative_tasks/koala_test.jsonl \
-    --output_file data/eval/creative_tasks/chatgpt_outputs.jsonl
-echo "Finished chatgpt_outputs.jsonl"
-python -m eval.creative_eval.get_gpt_outputs \
-    --engine gpt-4-0314 \
-    --input_files data/eval/creative_tasks/self_instruct_test.jsonl data/eval/creative_tasks/vicuna_test.jsonl data/eval/creative_tasks/koala_test.jsonl \
-    --output_file data/eval/creative_tasks/gpt4_outputs.jsonl 
-echo "Finished gpt4_outputs.jsonl"
+
+
+## wpq: for now skip the creative tasks.
+#
+# # check openai api key
+# if [ -z "$OPENAI_API_KEY" ]
+# then
+#     echo "Please set OPENAI_API_KEY in your environment variables in order to prepare the outputs for creative tasks."
+#     exit 1
+# fi
+# python -m eval.creative_eval.get_gpt_outputs \
+#     --engine gpt-3.5-turbo-0301 \
+#     --input_files data/eval/creative_tasks/self_instruct_test.jsonl data/eval/creative_tasks/vicuna_test.jsonl data/eval/creative_tasks/koala_test.jsonl \
+#     --output_file data/eval/creative_tasks/chatgpt_outputs.jsonl
+# echo "Finished chatgpt_outputs.jsonl"
+# python -m eval.creative_eval.get_gpt_outputs \
+#     --engine gpt-4-0314 \
+#     --input_files data/eval/creative_tasks/self_instruct_test.jsonl data/eval/creative_tasks/vicuna_test.jsonl data/eval/creative_tasks/koala_test.jsonl \
+#     --output_file data/eval/creative_tasks/gpt4_outputs.jsonl 
+# echo "Finished gpt4_outputs.jsonl"

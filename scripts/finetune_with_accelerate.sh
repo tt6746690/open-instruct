@@ -18,7 +18,7 @@ accelerate launch \
     --use_flash_attn \
     --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/${MODEL_SIZE} \
     --use_slow_tokenizer \
-    --train_file data/processed/oasst1/oasst1_data.jsonl\
+    --train_file data/processed/oasst1/oasst1_data.jsonl \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \

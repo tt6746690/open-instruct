@@ -217,6 +217,9 @@ def main():
         config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
     elif model_args.model_name_or_path:
         config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+        if 'mpt' in model_args.model_name_or_path:
+            config.attn_config['attn_impl'] = 'triton'
+            config.init_device = 'cuda' # For fast initialization directly on GPU!
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this finetuning script."
@@ -251,6 +254,7 @@ def main():
             revision=model_args.model_revision,
             use_auth_token=True if model_args.use_auth_token else None,
             torch_dtype=torch_dtype,
+            trust_remote_code=bool('mpt' in model_args.model_name_or_path),
         )
     else:
         logger.warning("No pretrained model_name_or_path is given. Training new model from scratch.")
