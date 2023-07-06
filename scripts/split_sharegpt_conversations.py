@@ -93,12 +93,18 @@ def main(args):
     content = []
     for file in args.in_files:
         content.extend(json.load(open(file)))
+
+
+    # wpq: enable `use_fast` for mosaicml/mpt-7 since only fast tokenizer is implemented.
+    use_fast = 'mpt' in args.model_name_or_path
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         args.model_name_or_path,
         use_fast=False,
     )
     new_content = split_all(content, args.begin, args.end, tokenizer, args.max_length)
+    print(f"after split:  {len(new_content)}")
     new_content = filter_invalid_roles(new_content)
+    print(f"after filter: {len(new_content)}")
 
     print(f"total: {len(content)}, new: {len(new_content)}")
     json.dump(new_content, open(args.out_file, "w"), indent=2)

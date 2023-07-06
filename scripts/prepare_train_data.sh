@@ -63,10 +63,18 @@ echo "Downloading ShareGPT dataset..."
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part1_html_cleaned.json
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part2_html_cleaned.json
 echo "Splitting the ShareGPT dataset..."
+
+# wpq: Use jupyter notebook to run the following code.
+#
+# 
+# python scripts/split_sharegpt_conversations.py \
+#     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
+#     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split.json \
+#     --model-name-or-path ../hf_llama_models/7B/
 python scripts/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split.json \
-    --model-name-or-path ../hf_llama_models/7B/
+    --model-name-or-path  mosaicml/mpt-7b
 
 
 echo "Downloading LIMA dataset..."

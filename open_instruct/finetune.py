@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
+## wpq: should roughly follow https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm_no_trainer.py 
 
 import argparse
 import logging
@@ -30,6 +31,7 @@ from transformers import (
     GPT2Tokenizer,
     OPTForCausalLM,
     BitsAndBytesConfig,
+    GPT2TokenizerFast,
 )
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 
@@ -354,6 +356,9 @@ def main():
 
     if args.with_tracking:
         accelerator_log_kwargs["log_with"] = args.report_to
+        ## wpq: https://huggingface.co/docs/accelerate/v0.20.3/en/package_reference/accelerator#accelerate.Accelerator.kwargs_handlers
+        # it seems `project_dir` is the right keyword.
+        # accelerator_log_kwargs["logging_dir"] = args.output_dir
         accelerator_log_kwargs["project_dir"] = args.output_dir
 
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, **accelerator_log_kwargs)
@@ -402,7 +407,10 @@ def main():
     if args.config_name:
         config = AutoConfig.from_pretrained(args.config_name)
     elif args.model_name_or_path:
-        config = AutoConfig.from_pretrained(args.model_name_or_path)
+        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+        if 'mpt' in args.model_name_or_path:
+            config.attn_config['attn_impl'] = 'triton'
+            config.init_device = 'cuda' # For fast initialization directly on GPU!
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."
@@ -464,8 +472,14 @@ def main():
             "pad_token": "<pad>",
         })
         assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
-    elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
+    elif isinstance(tokenizer, (GPT2Tokenizer, GPT2TokenizerFast)) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
+    ## wpq: add support for gpt2 tokenizer.
+    elif isinstance(tokenizer, (GPT2Tokenizer, GPT2TokenizerFast)):
+        num_added_tokens = tokenizer.add_special_tokens({
+            "pad_token": "<pad>",
+        })
+        assert num_added_tokens == 1, "GPT2Tokenizer should only add one special token - the pad_token."
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -610,10 +624,10 @@ def main():
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
-    logger.info(f"  Num examples = {len(train_dataset)}")
+    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) =  Num examples = {len(train_dataset)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
-    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    logger.info(f" {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
     # Only show the progress bar once on each machine.
@@ -723,6 +737,7 @@ def main():
         accelerator.end_training()
 
     if args.output_dir is not None:
+        ## wpq: wait for all processes completes training.
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)

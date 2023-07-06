@@ -1,4 +1,6 @@
-torch
+# wpq: added torch version
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.0.0+cu118
 scipy
 packaging
 sentencepiece
@@ -24,7 +26,9 @@ termcolor
 jsonlines
 unidic-lite
 einops
-flash-attn
+# wpq: gives cuda version 12.1 mismatch with version pytorch is compiled with (11.8) error and it doesn't seem to be an easy fix.
+# open-instruct uses flash-attn for llama model. so fix this if I need to use llama for anything.
+# flash-attn
 auto-gptq
 fire
 # alpaca-farm eval - my fork with some fixes.
@@ -32,3 +36,7 @@ git+https://github.com/hamishivi/alpaca_farm.git
 # for human eval web app
 flask
 vllm 
+# wpq: for mosaicml/mpt-7b
+triton-pre-mlir@git+https://github.com/vchiley/triton.git@triton_pre_mlir_sm90#subdirectory=python
+# wpq: for open-instuct logging
+tensorboard
