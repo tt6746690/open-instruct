@@ -42,6 +42,8 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
         attention_mask = tokenized_prompts.attention_mask
 
         if model.device.type == "cuda":
+            print(torch.cuda.is_available())
+            print(batch_input_ids.device, batch_input_ids.shape)
             batch_input_ids = batch_input_ids.cuda()
             attention_mask = attention_mask.cuda()
 
