@@ -28,7 +28,7 @@ class KeyWordsCriteria(StoppingCriteria):
         return all(sequences_should_be_stopped)
     
     
-@torch.no_grad()
+@torch.inference_mode()
 def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequences=None, add_special_tokens=True, disable_tqdm=False, **generation_kwargs):
     generations = []
     if not disable_tqdm:
@@ -99,7 +99,7 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
     return generations
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=None, batch_size=1, return_token_predictions=False, add_special_tokens=True, disable_tqdm=False):
     predictions, probs = [], []
     if not disable_tqdm:
@@ -138,7 +138,7 @@ def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=Non
     return predictions, probs
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def score_completions(model, tokenizer, scoring_examples, disable_tqdm=False):
     '''
     Each scoring example is a dict, which contains the following keys:
@@ -201,36 +201,37 @@ def load_hf_lm_and_tokenizer(
         padding_side="left",
     ):
     
-    from transformers import AutoModelForCausalLM, AutoTokenizer, OPTForCausalLM, GPTNeoXForCausalLM
+    from transformers import AutoModelForCausalLM, AutoTokenizer, OPTForCausalLM, GPTNeoXForCausalLM, AutoConfig
 
     if gptq_model:
         from auto_gptq import AutoGPTQForCausalLM
         model_wrapper = AutoGPTQForCausalLM.from_quantized(
-            model_name_or_path, device="cuda:0", use_triton=True
+            model_name_or_path, 
+            device="cuda:0", 
+            use_triton=True,
         )
         model = model_wrapper.model
-    elif load_in_8bit:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path, 
-            device_map=device_map, 
-            load_in_8bit=True
-        )
     else:
-        if device_map:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map=device_map, torch_dtype=torch_dtype)
+        from_pretrained_kwargs = {
+            'device_map': device_map,
+            'torch_dtype': torch_dtype,
+            'load_in_8bit': load_in_8bit,
+        }
+        if  't5' in model_name_or_path:
+            from transformers import T5ForConditionalGeneration
+            model = T5ForConditionalGeneration.from_pretrained(
+                model_name_or_path, **from_pretrained_kwargs)
+        elif 'mpt' in model_name_or_path: 
+            config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+            config.attn_config['attn_impl'] = 'triton'
+            config.init_device = 'cuda' # For fast initialization directly on GPU!
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path, trust_remote_code=True, config=config, **from_pretrained_kwargs)
         else:
-<<<<<<< HEAD
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=torch_dtype)
-            if torch.cuda.is_available():
-                model = model.cuda()
-        if convert_to_half:
-=======
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
-            # if torch.cuda.is_available():
-            #     model = model.cuda()
-        if load_in_half:
->>>>>>> fb9c600... add
-            model = model.half()
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                **from_pretrained_kwargs,
+            )
     model.eval()
 
     if not tokenizer_name_or_path:
