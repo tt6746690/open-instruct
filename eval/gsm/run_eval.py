@@ -4,6 +4,8 @@ import re
 import json
 import random
 import evaluate
+from transformers import GPT2LMHeadModel
+
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
 from eval.gsm.examplars import EXAMPLARS as GSM_EXAMPLARS
 
@@ -70,14 +72,25 @@ def main(args):
             load_in_8bit=args.load_in_8bit, 
             gptq_model=args.gptq
         )
-        new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
+        # get the last token because the tokenizer may add space tokens at the start.
+        # wpq: t5 tokenizer strips `\n`. don't use `\n` as stop sequence. just generate to max length or encounters <\s>. 
+        new_line_token = tokenizer.encode("\n", add_special_tokens=False)
+        stop_id_sequences = [[new_line_token[-1]]] if new_line_token else None
+
+        if isinstance(model, GPT2LMHeadModel):
+            # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
+            generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
+        else:
+            # wpq: modify `max_new_tokens=512` to `256` by default
+            generation_kwargs = {'max_new_tokens': 256}
+
         outputs = generate_completions(
             model=model,
             tokenizer=tokenizer,
             prompts=prompts,
             batch_size=args.eval_batch_size,
-            stop_id_sequences=[[new_line_token]],
-            max_new_tokens=512,
+            stop_id_sequences=stop_id_sequences,
+            **generation_kwargs,
         )
     else:
         instances = [{"id": prompt, "prompt": prompt} for _, prompt in enumerate(prompts)]

@@ -5,6 +5,7 @@ import time
 import asyncio
 import os
 from transformers import StoppingCriteria, StoppingCriteriaList
+from transformers import T5ForConditionalGeneration
 
 #from open_instruct.finetune import encode_with_prompt_completion_format
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
@@ -32,6 +33,9 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
     if not disable_tqdm:
         progress = tqdm.tqdm(total=len(prompts), desc="Generating Completions")
 
+    # wpq: Use `StoppingCriteriaList` instead of `List`
+    stopping_criteria = StoppingCriteriaList([KeyWordsCriteria(stop_id_sequences)]) if stop_id_sequences else None
+
     num_return_sequences = generation_kwargs.get("num_return_sequences", 1)
     for i in range(0, len(prompts), batch_size):
         batch_prompts = prompts[i:i+batch_size]
@@ -44,15 +48,13 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
             attention_mask = attention_mask.cuda()
 
         try:
-            stopping_criteria = StoppingCriteriaList([KeyWordsCriteria(stop_id_sequences)]) if stop_id_sequences else None
-
             batch_outputs = model.generate(
                 input_ids=batch_input_ids,
                 attention_mask=attention_mask,
                 stopping_criteria=stopping_criteria,
                 **generation_kwargs
             )
-        
+
             # the stopping criteria is applied at batch level, so if other examples are not stopped, the entire batch will continue to generate.
             # so some outputs still have the stop sequence, which we need to remove.
             if stop_id_sequences:
@@ -62,21 +64,27 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
                             batch_outputs[output_idx, token_idx:] = tokenizer.pad_token_id
                             break
 
-            # remove the prompt from the output
-            # we need to re-encode the prompt because we need to make sure the special tokens are treated the same way as in the outputs.
-            # we changed our previous way of truncating the output token ids dicrectly because some tokenizer (e.g., llama) won't add space token before the first token.
-            # space is important for some tasks (e.g., code completion).
-            batch_outputs = tokenizer.batch_decode(batch_outputs, skip_special_tokens=True)
-            batch_prompts = tokenizer.batch_decode(batch_input_ids, skip_special_tokens=True)
-            # duplicate the prompts to match the number of return sequences
-            batch_prompts = [prompt for prompt in batch_prompts for _ in range(num_return_sequences)]
-            # remove the prompt from the output
-            batch_generations = [
-                output[len(prompt):] for prompt, output in zip(batch_prompts, batch_outputs)
-            ]
+            if isinstance(model, T5ForConditionalGeneration):
+                # wpq: encoder-decoder models generated outputs do not include prompts.
+                batch_generations = tokenizer.batch_decode(batch_outputs, skip_special_tokens=True)
+            else:
+                # remove the prompt from the output
+                # we need to re-encode the prompt because we need to make sure the special tokens are treated the same way as in the outputs.
+                # we changed our previous way of truncating the output token ids dicrectly because some tokenizer (e.g., llama) won't add space token before the first token.
+                # space is important for some tasks (e.g., code completion).
+                batch_outputs = tokenizer.batch_decode(batch_outputs, skip_special_tokens=True)
+                batch_prompts = tokenizer.batch_decode(batch_input_ids, skip_special_tokens=True)
+                # duplicate the prompts to match the number of return sequences
+                batch_prompts = [prompt for prompt in batch_prompts for _ in range(num_return_sequences)]
+                # remove the prompt from the output
+                batch_generations = [
+                    output[len(prompt):] for prompt, output in zip(batch_prompts, batch_outputs)
+                ]
         except Exception as e:
             print("Error when generating completions for batch:")
             print(batch_prompts)
+            import traceback
+            traceback.print_exc()
             print("Error message:")
             print(e)
             print("Use empty string as the completion.")
@@ -186,17 +194,17 @@ def score_completions(model, tokenizer, scoring_examples, disable_tqdm=False):
     return rolled_up_scores
 
 
-
 def load_hf_lm_and_tokenizer(
         model_name_or_path, 
         tokenizer_name_or_path=None, 
         device_map="auto", 
         gptq_model=False,
         load_in_8bit=False,
-        dtype=torch.bfloat16,
+        dtype=torch.float16,
         use_fast_tokenizer=False,
         padding_side="left",
     ):
+    
     from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 
     if not tokenizer_name_or_path:
@@ -218,7 +226,7 @@ def load_hf_lm_and_tokenizer(
             use_triton=True,
         )
         model = model_wrapper.model
-    else:       
+    else:
         from_pretrained_kwargs = {
             'device_map': device_map,
             'torch_dtype': dtype,
