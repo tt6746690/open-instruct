@@ -4,7 +4,7 @@ import json
 import time
 import asyncio
 import os
-from transformers import StoppingCriteria
+from transformers import StoppingCriteria, StoppingCriteriaList
 
 #from open_instruct.finetune import encode_with_prompt_completion_format
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
@@ -40,16 +40,16 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
         attention_mask = tokenized_prompts.attention_mask
 
         if model.device.type == "cuda":
-            print(torch.cuda.is_available())
-            print(batch_input_ids.device, batch_input_ids.shape)
             batch_input_ids = batch_input_ids.cuda()
             attention_mask = attention_mask.cuda()
 
         try:
+            stopping_criteria = StoppingCriteriaList([KeyWordsCriteria(stop_id_sequences)]) if stop_id_sequences else None
+
             batch_outputs = model.generate(
                 input_ids=batch_input_ids,
                 attention_mask=attention_mask,
-                stopping_criteria=[KeyWordsCriteria(stop_id_sequences)] if stop_id_sequences else None,
+                stopping_criteria=stopping_criteria,
                 **generation_kwargs
             )
         
@@ -70,6 +70,7 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
             batch_prompts = tokenizer.batch_decode(batch_input_ids, skip_special_tokens=True)
             # duplicate the prompts to match the number of return sequences
             batch_prompts = [prompt for prompt in batch_prompts for _ in range(num_return_sequences)]
+            # remove the prompt from the output
             batch_generations = [
                 output[len(prompt):] for prompt, output in zip(batch_prompts, batch_outputs)
             ]
@@ -214,7 +215,7 @@ def load_hf_lm_and_tokenizer(
         model_wrapper = AutoGPTQForCausalLM.from_quantized(
             model_name_or_path, device="cuda:0", use_triton=True
         )
-        model = model_wrapper.model  
+        model = model_wrapper.model
     elif load_in_8bit:
         model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, 
@@ -226,8 +227,8 @@ def load_hf_lm_and_tokenizer(
             model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map=device_map)
         else:
             model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
-            if torch.cuda.is_available():
-                model = model.cuda()
+            # if torch.cuda.is_available():
+            #     model = model.cuda()
         if load_in_half:
             model = model.half()
     model.eval()

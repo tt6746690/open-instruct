@@ -76,9 +76,9 @@ def main(args):
             model=model,
             tokenizer=tokenizer,
             prompts=prompts,
-            max_new_tokens=512,
             batch_size=args.eval_batch_size,
-            stop_id_sequences=[[new_line_token]]
+            stop_id_sequences=[[new_line_token]],
+            max_new_tokens=512,
         )
     else:
         instances = [{"id": prompt, "prompt": prompt} for _, prompt in enumerate(prompts)]
