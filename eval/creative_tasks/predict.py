@@ -73,7 +73,6 @@ if __name__ == "__main__":
         model, tokenizer = load_hf_lm_and_tokenizer(
             model_name_or_path=args.model_name_or_path, 
             load_in_8bit=args.load_in_8bit, 
-            load_in_half=True,
             gptq_model=args.gptq
         )
         outputs = generate_completions(

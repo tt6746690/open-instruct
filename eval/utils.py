@@ -24,9 +24,9 @@ class KeyWordsCriteria(StoppingCriteria):
                     break
             sequences_should_be_stopped.append(False)
         return all(sequences_should_be_stopped)
-    
-    
-@torch.no_grad()
+
+
+@torch.inference_mode()
 def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequences=None, disable_tqdm=False, **generation_kwargs):
     generations = []
     if not disable_tqdm:
@@ -97,7 +97,7 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
     return generations
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=None, batch_size=1, return_token_predictions=False, disable_tqdm=False):
     predictions, probs = [], []
     if not disable_tqdm:
@@ -136,7 +136,7 @@ def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=Non
     return predictions, probs
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def score_completions(model, tokenizer, scoring_examples, disable_tqdm=False):
     '''
     Each scoring example is a dict, which contains the following keys:
@@ -191,21 +191,21 @@ def load_hf_lm_and_tokenizer(
         model_name_or_path, 
         tokenizer_name_or_path=None, 
         device_map="auto", 
-        load_in_8bit=False, 
-        load_in_half=False,
         gptq_model=False,
+        load_in_8bit=False,
+        dtype=torch.bfloat16,
         use_fast_tokenizer=False,
         padding_side="left",
     ):
-    
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 
     if not tokenizer_name_or_path:
         tokenizer_name_or_path = model_name_or_path
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer_name_or_path, use_fast=use_fast_tokenizer)
     # set padding side to left for batch generation
     tokenizer.padding_side = padding_side
-    # set pad token to eos token if pad token is not set (as is the case for llama models)
+    # set pad token to eos token if pad token is not set
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -213,24 +213,32 @@ def load_hf_lm_and_tokenizer(
     if gptq_model:
         from auto_gptq import AutoGPTQForCausalLM
         model_wrapper = AutoGPTQForCausalLM.from_quantized(
-            model_name_or_path, device="cuda:0", use_triton=True
+            model_name_or_path, 
+            device="cuda:0", 
+            use_triton=True,
         )
         model = model_wrapper.model
-    elif load_in_8bit:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path, 
-            device_map=device_map, 
-            load_in_8bit=True
-        )
-    else:
-        if device_map:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map=device_map)
+    else:       
+        from_pretrained_kwargs = {
+            'device_map': device_map,
+            'torch_dtype': dtype,
+            'load_in_8bit': load_in_8bit,
+        }
+        if  't5' in model_name_or_path:
+            from transformers import T5ForConditionalGeneration
+            model = T5ForConditionalGeneration.from_pretrained(
+                model_name_or_path, **from_pretrained_kwargs)
+        elif 'mpt' in model_name_or_path: 
+            config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+            config.attn_config['attn_impl'] = 'triton'
+            config.init_device = 'cuda' # For fast initialization directly on GPU!
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path, trust_remote_code=True, config=config, **from_pretrained_kwargs)
         else:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
-            # if torch.cuda.is_available():
-            #     model = model.cuda()
-        if load_in_half:
-            model = model.half()
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                **from_pretrained_kwargs,
+            )
     model.eval()
     return model, tokenizer
 

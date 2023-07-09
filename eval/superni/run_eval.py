@@ -57,7 +57,6 @@ if __name__ == "__main__":
         model_name_or_path=args.model, 
         tokenizer_name_or_path=args.tokenizer, 
         load_in_8bit=args.load_in_8bit, 
-        load_in_half=True,
         gptq_model=args.gptq
     )
 
