@@ -18,7 +18,6 @@ from eval.utils import (
 exact_match = evaluate.load("exact_match")
     
 
-@torch.no_grad()
 def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None):
     targets = [example["target"] for example in examples]
     if save_path:

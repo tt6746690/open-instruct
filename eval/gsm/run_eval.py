@@ -95,7 +95,7 @@ def main(args):
             # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
             generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
         else:
-            # wpq: modify `max_new_tokens=512` to `256` by default
+            # wpq: modify `max_new_tokens=512` to `256` for faster generation.
             generation_kwargs = {'max_new_tokens': 256}
 
         outputs = generate_completions(
