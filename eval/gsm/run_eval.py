@@ -70,7 +70,8 @@ def main(args):
             model_name_or_path=args.model_name_or_path, 
             tokenizer_name_or_path=args.tokenizer_name_or_path, 
             load_in_8bit=args.load_in_8bit, 
-            gptq_model=args.gptq
+            gptq_model=args.gptq,
+            use_fast_tokenizer=True,
         )
         # get the last token because the tokenizer may add space tokens at the start.
         # wpq: t5 tokenizer strips `\n`. don't use `\n` as stop sequence. just generate to max length or encounters <\s>. 
@@ -81,7 +82,7 @@ def main(args):
             # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
             generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
         else:
-            # wpq: modify `max_new_tokens=512` to `256` by default
+            # wpq: modify `max_new_tokens=512` to `256` for faster generation.
             generation_kwargs = {'max_new_tokens': 256}
 
         outputs = generate_completions(

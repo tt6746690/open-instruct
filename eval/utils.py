@@ -200,12 +200,15 @@ def load_hf_lm_and_tokenizer(
         device_map="auto", 
         gptq_model=False,
         load_in_8bit=False,
-        dtype=torch.float16,
+        dtype='auto',
         use_fast_tokenizer=False,
         padding_side="left",
     ):
     
     from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
+
+    if dtype == 'auto':
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
 
     if not tokenizer_name_or_path:
         tokenizer_name_or_path = model_name_or_path
