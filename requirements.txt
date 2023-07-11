@@ -39,3 +39,5 @@ triton-pre-mlir@git+https://github.com/vchiley/triton.git@triton_pre_mlir_sm90#s
 tensorboard
 # wpq: for jpt_setup()
 omegaconf
+# wpq: monitor memory usage
+pynvml

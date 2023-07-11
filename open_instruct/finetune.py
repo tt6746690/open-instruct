@@ -23,6 +23,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     LlamaTokenizer,
+    LlamaTokenizerFast,
     SchedulerType,
     DataCollatorForSeq2Seq,
     get_scheduler,
@@ -402,14 +403,14 @@ def main():
 
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
-    if isinstance(tokenizer, LlamaTokenizer):
+    if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
         num_added_tokens = tokenizer.add_special_tokens({
             "bos_token": "<s>",
             "eos_token": "</s>",
             "unk_token": "<unk>",
             "pad_token": "<pad>",
         })
-        assert num_added_tokens in [0, 1], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        assert num_added_tokens in [0, 1], "LlamaTokenizer/ LlamaTokenizerFast should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         num_added_tokens = tokenizer.add_special_tokens({
             "pad_token": "<pad>",
