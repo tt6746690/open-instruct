@@ -34,6 +34,7 @@ from transformers import (
     GPT2TokenizerFast,
 )
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+from llm.monitor import print_gpu_utilization
 
 logger = get_logger(__name__)
 
@@ -451,6 +452,8 @@ def main():
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
+                trust_remote_code=bool('mpt' in args.model_name_or_path),
+                torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
             )
     else:
         logger.info("Training new model from scratch")
@@ -500,12 +503,18 @@ def main():
             lora_dropout=args.lora_dropout,
             target_modules=["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"]
         )
+        # wpq: use int8 training
+        # from peft import prepare_model_for_int8_training
+        # model = prepare_model_for_int8_training(model)
         model = get_peft_model(model, peft_config)
         # peft breaks flash attention due to casting norms to fp32. This fixes it back up.
         # See https://github.com/huggingface/peft/issues/790
         from llama_flash_attn_monkey_patch import upcast_layer_for_flash_attention
         model = upcast_layer_for_flash_attention(model, torch.bfloat16)
         model.print_trainable_parameters()
+
+    # wpq: print gpu utilization
+    print_gpu_utilization()
 
     # Preprocessing the datasets.
     if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
@@ -672,6 +681,12 @@ def main():
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
+    print('before train loop:')
+    print_gpu_utilization()
+    print('torch.cuda.memory_allocated(): ', torch.cuda.memory_allocated())
+    print("model.device:", model.device)
+    print("model.dtype:", model.dtype)
+
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         total_loss = 0
@@ -716,6 +731,10 @@ def main():
                             step=completed_steps,
                         )
                     total_loss = 0
+
+                    # wpq: check gpu memory usage.
+                    print_gpu_utilization()
+                    print('torch.cuda.memory_allocated(): ', torch.cuda.memory_allocated())
                     
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
