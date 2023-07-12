@@ -33,6 +33,7 @@ from transformers import (
     OPTForCausalLM
 )
 from peft import LoraConfig, TaskType, get_peft_model
+from llm.monitor import print_gpu_utilization
 
 logger = get_logger(__name__)
 
@@ -395,6 +396,7 @@ def main():
             config=config,
             low_cpu_mem_usage=args.low_cpu_mem_usage,
             trust_remote_code=bool('mpt' in args.model_name_or_path),
+            torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
         )
     else:
         logger.info("Training new model from scratch")
@@ -440,8 +442,14 @@ def main():
             lora_alpha=args.lora_alpha, 
             lora_dropout=args.lora_dropout
         )
+        # wpq: use int8 training
+        # from peft import prepare_model_for_int8_training
+        # model = prepare_model_for_int8_training(model)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
+
+    # wpq: print gpu utilization
+    print_gpu_utilization()
 
     # Preprocessing the datasets.
     if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
@@ -589,6 +597,12 @@ def main():
     progress_bar.update(starting_epoch * num_update_steps_per_epoch)
     completed_steps = starting_epoch * num_update_steps_per_epoch
 
+    print('before train loop:')
+    print_gpu_utilization()
+    print('torch.cuda.memory_allocated(): ', torch.cuda.memory_allocated())
+    print("model.device:", model.device)
+    print("model.dtype:", model.dtype)
+
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         total_loss = 0
@@ -601,7 +615,15 @@ def main():
                         completed_steps += 1
                     continue
 
+            # # wpq: debug OOM issue.
+            # print(step,' batch.input_ids: ', batch['input_ids'].shape)
+            # print_gpu_utilization()
+            # print('torch.cuda.memory_allocated(): ', torch.cuda.memory_allocated())
+            # print("model.device:", model.device)
+            # print("model.dtype:", model.dtype)
+
             with accelerator.accumulate(model):
+                # `use_cache=True` incompatible with gradient checkpointing 
                 outputs = model(**batch, use_cache=False)
                 loss = outputs.loss
                 # We keep track of the loss at each logged step
@@ -628,6 +650,10 @@ def main():
                             step=completed_steps,
                         )
                     total_loss = 0
+
+                    # wpq: check gpu memory usage.
+                    print_gpu_utilization()
+                    print('torch.cuda.memory_allocated(): ', torch.cuda.memory_allocated())
                     
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
