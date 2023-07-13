@@ -78,6 +78,7 @@ def main(args):
         new_line_token = tokenizer.encode("\n", add_special_tokens=False)
         stop_id_sequences = [[new_line_token[-1]]] if new_line_token else None
 
+        from transformers import GPT2LMHeadModel
         if isinstance(model, GPT2LMHeadModel):
             # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
             generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
