@@ -44,7 +44,7 @@ def gen_prompt(train_df, subject, k=-1):
     return prompt
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
@@ -208,7 +208,7 @@ def main(args):
             test_df["choice{}_probs".format(choice)] = probs[:, j]
         test_df.to_csv(
             os.path.join(
-                args.save_dir, "{}.csv".format(subject)
+                args.save_dir, "csvs", "{}.csv".format(subject)
             ),
             index=None,
         )
