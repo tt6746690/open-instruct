@@ -43,7 +43,7 @@ def gen_prompt(train_df, subject, k=-1):
     return prompt
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
     prompts = []
     for i in range(0, test_df.shape[0]):
@@ -155,6 +155,8 @@ def main(args):
         os.makedirs(args.save_dir)
     if not os.path.exists(os.path.join(args.save_dir)):
         os.makedirs(os.path.join(args.save_dir))
+    if not os.path.exists(os.path.join(args.save_dir, "csvs")):
+        os.makedirs(os.path.join(args.save_dir, "csvs"))
 
     all_cors = []
     subcat_cors = {
@@ -192,7 +194,7 @@ def main(args):
             test_df["choice{}_probs".format(choice)] = probs[:, j]
         test_df.to_csv(
             os.path.join(
-                args.save_dir, "{}.csv".format(subject)
+                args.save_dir, "csvs", "{}.csv".format(subject)
             ),
             index=None,
         )

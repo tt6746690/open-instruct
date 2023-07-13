@@ -10,10 +10,9 @@ import evaluate
 from eval.utils import load_hf_lm_and_tokenizer, generate_completions, query_openai_chat_model
 
 
-exact_match = evaluate.load("exact_match")
     
 
-def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None):
+def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None, exact_match=None):
     targets = [example["target"] for example in examples]
     if save_path:
         fout = open(save_path, "w")
@@ -43,13 +42,15 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None)
     else:
         # wpq: modify `max_new_tokens=512` to `128` for faster generation.
         # for non-cot multiple choice answers, e.g., ' (G).' requires just 5 tokens
-        generation_kwargs = {'max_new_tokens': 10 if args.no_cot else 128}
+        generation_kwargs = {'max_new_tokens': 10 if args.no_cot else 512}
+
+    batch_size = args.eval_batch_size if args.eval_batch_size else 1
 
     outputs = generate_completions(
         model=model,
         tokenizer=tokenizer,
         prompts=prompts,
-        batch_size=args.eval_batch_size if args.eval_batch_size else 1,
+        batch_size=batch_size,
         stop_id_sequences=stop_id_sequences,
         **generation_kwargs,
     )
@@ -78,7 +79,7 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None)
     return exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
 
 
-def eval_openai_chat_engine(args, examples, task_prompt, save_path=None):
+def eval_openai_chat_engine(args, examples, task_prompt, save_path=None, exact_match=None):
     targets = [example["target"] for example in examples]
     instances = []
     for i, example in enumerate(examples):
@@ -125,6 +126,10 @@ def eval_openai_chat_engine(args, examples, task_prompt, save_path=None):
 
 def main(args):
     random.seed(42)
+    # wpq: prevents the following error.
+    # `ValueError: Error in finalize: another evaluation module instance is already using the local cache file. Please specify an experiment_id to avoid collision between distributed evaluation module instances.`
+    exact_match = evaluate.load(
+        "exact_match", experiment=args.model_name_or_path+('_chatfmt' if args.use_chat_format else ''))
 
     all_tasks = {}
     task_files = glob.glob(os.path.join(args.data_dir, "bbh", "*.json"))
@@ -181,14 +186,16 @@ def main(args):
                 tokenizer, 
                 task_examples, 
                 prompt, 
-                save_path=os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl")
+                save_path=os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl"),
+                exact_match=exact_match,
             )
         else:
             task_perf = eval_openai_chat_engine(
                 args,
                 task_examples,
                 prompt,
-                save_path=os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl")
+                save_path=os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl"),
+                exact_match=exact_match,
             )
         performance[task_name] = task_perf
         print(f"Task {task_name} - EM: {task_perf}")
