@@ -39,19 +39,31 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None)
         prompts.append(prompt)
 
     if args.no_cot:
-        stop_sequnce = tokenizer.encode("\n\n", add_special_tokens=False)[-2:] # get the last token because the tokenizer may add space tokens at the start.
+        # get the last token because the tokenizer may add space tokens at the start.
+        # wpq: t5 tokenizer strips `\n`. don't use `\n` as stop sequence. just generate to max length or encounters <\s>.
+        stop_id_sequences = tokenizer.encode("\n\n", add_special_tokens=False)
+        stop_id_sequences = [stop_id_sequences[-2:]] if stop_id_sequences else None
     else:
         # let's not use the stop sequence for cot now since it's too inefficient when the generation is long. 
         # instead, we'll do some post-processing to extract the answer.
-        stop_sequnce = None
-    
+        stop_id_sequences = None
+
+    from transformers import GPT2LMHeadModel
+    if isinstance(model, GPT2LMHeadModel):
+        # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
+        generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
+    else:
+        # wpq: modify `max_new_tokens=512` to `128` for faster generation.
+        # for non-cot multiple choice answers, e.g., ' (G).' requires just 5 tokens
+        generation_kwargs = {'max_new_tokens': 10 if args.no_cot else 128}
+
     outputs = generate_completions(
         model=model,
         tokenizer=tokenizer,
         prompts=prompts,
-        max_new_tokens=512,
         batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-        stop_id_sequences=[[stop_sequnce]] 
+        stop_id_sequences=stop_id_sequences,
+        **generation_kwargs,
     )
 
     predictions = []
