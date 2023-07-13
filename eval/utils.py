@@ -204,8 +204,34 @@ def load_hf_lm_and_tokenizer(
         use_fast_tokenizer=False,
         padding_side="left",
     ):
-    
     from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
+
+    # wpq: load peft model
+    checkpoint_name = os.path.join(model_name_or_path, 'adapter_model.bin')
+    if os.path.exists(checkpoint_name):
+        from peft import PeftModel, PeftConfig
+        peft_model_name_or_path = model_name_or_path
+        config = PeftConfig.from_pretrained(peft_model_name_or_path)
+        model, tokenizer = load_hf_lm_and_tokenizer(
+            model_name_or_path=config.base_model_name_or_path, 
+            tokenizer_name_or_path=config.base_model_name_or_path,
+            device_map=device_map,
+            gptq_model=gptq_model,
+            load_in_8bit=load_in_8bit,
+            dtype=dtype,
+            use_fast_tokenizer=use_fast_tokenizer,
+            padding_side=padding_side,
+        )
+        peft_model = PeftModel.from_pretrained(model, peft_model_name_or_path)
+        # merge LoRA weights to base model weights for faster inference.
+        model = peft_model.base_model.merge_and_unload()
+        embedding_size = model.get_input_embeddings().weight.shape[0]
+        if len(tokenizer) > embedding_size:
+            print(f"The vocabulary size of the tokenizer in the LoRA model folder"
+                f"contains {len(tokenizer)-embedding_size} more tokens than the base model.\n"
+                "Resizing the token embeddings of the merged model...")
+            model.resize_token_embeddings(len(tokenizer))
+        return model, tokenizer
 
     if dtype == 'auto':
         dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16

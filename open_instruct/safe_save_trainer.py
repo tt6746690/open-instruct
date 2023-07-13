@@ -52,7 +52,8 @@ class SafeSaveTrainer(Trainer):
 
             if self.args.should_save:
                 self._save(output_dir, state_dict=state_dict)
-        elif self.deepspeed:
+        # wpq: fix `SafeSaveTrainer` has no `deepspeed` attribute
+        elif hasattr(self, 'deepspeed') and self.deepspeed:
             # this takes care of everything as long as we aren't under zero3
             if self.args.should_save:
                 self._save(output_dir)
