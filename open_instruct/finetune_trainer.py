@@ -402,7 +402,8 @@ def main():
     if len(tokenizer) > embedding_size:
         model.resize_token_embeddings(len(tokenizer))
 
-    ## wpq: put this after resize embedding!
+    # wpq: use int8 training
+    # wpq: put this after resize embedding!
     if model_args.load_in_8bit:
         from peft import prepare_model_for_int8_training
         model = prepare_model_for_int8_training(model)
@@ -419,9 +420,13 @@ def main():
             lora_dropout=model_args.lora_dropout,
             target_modules=['q_proj','k_proj','v_proj','o_proj'],
         )
-        # wpq: use int8 training
-        # from peft import prepare_model_for_int8_training
-        # model = prepare_model_for_int8_training(model)
+        # wpq: the following fixes `element 0 of tensors does not require grad and does not have a grad_fn` 
+        # https://github.com/huggingface/peft/issues/137
+        # https://github.com/huggingface/peft/issues/522
+        if hasattr(training_args, 'gradient_checkpointing'):
+            if training_args.gradient_checkpointing:
+                model.enable_input_require_grads()
+
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
