@@ -36,7 +36,8 @@ def main(args):
             load_in_8bit=args.load_in_8bit, 
             # device map is determined by the number of gpus available.
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
-            gptq_model=args.gptq
+            gptq_model=args.gptq,
+            use_fast_tokenizer=True,
         )
 
         # these stop sequences are those mentioned in the codex paper.
@@ -44,6 +45,13 @@ def main(args):
         # Because many tokenizers will treat the word after space differently from the original word alone, 
         # to be consistent, we add a space before tokenization and remove it after tokenization.
         stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]
+
+        from transformers import GPT2LMHeadModel
+        if isinstance(model, GPT2LMHeadModel):
+            generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
+        else:
+            generation_kwargs = {'max_new_tokens': 512}
+
         outputs_per_sampling_iter = []
         for sampling_iter in range(args.unbiased_sampling_size_n):
             print(f"Sampling iter: {sampling_iter} / {args.unbiased_sampling_size_n}")
@@ -51,13 +59,13 @@ def main(args):
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
-                max_new_tokens=512,
                 batch_size=args.eval_batch_size,
                 stop_id_sequences=stop_sequences,
                 num_return_sequences=1,  # we don't use the hf num_return_sequences, because otherwise the real batch size will be multiplied by it and often cause oom.
                 do_sample=True,  # if only pass@1 is evaluated, we do greedy decoding.
                 top_p=0.95,
                 temperature=args.temperature,
+                **generation_kwargs,
             )
             outputs_per_sampling_iter.append(samping_outputs)
         # regroup the outputs to match the number of test data.
