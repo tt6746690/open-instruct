@@ -20,7 +20,10 @@ else:
 
 logger = logging.get_logger(__name__)
 
+
+
 class SafeSaveTrainer(Trainer):
+
     def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
         """
         Will save the model, so you can reload it using `from_pretrained()`.
