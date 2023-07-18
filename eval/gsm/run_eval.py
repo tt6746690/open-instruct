@@ -97,7 +97,7 @@ def main(args):
             generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
         else:
             # wpq: modify `max_new_tokens=512` to `256` for faster generation.
-            generation_kwargs = {'max_new_tokens': 256}
+            generation_kwargs = {'max_new_tokens': 512}
 
         outputs = generate_completions(
             model=model,
