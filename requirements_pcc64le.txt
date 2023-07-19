@@ -1,0 +1,41 @@
+/gpfs/u/home/PTFM/PTFMqngp/scratch/tools/torch-2.1.0a0+gita37b4fa-cp310-cp310-linux_ppc64le.whl
+sentencepiece
+ninja
+accelerate
+git+https://github.com/huggingface/peft.git
+bitsandbytes
+evaluate
+tokenizers
+protobuf
+transformers
+datasets
+huggingface_hub
+openai
+rouge_score
+wandb
+gradio
+markupsafe
+termcolor
+jsonlines
+unidic-lite
+einops
+auto-gptq
+fire
+flask
+tensorboard
+omegaconf
+pynvml
+
+# ppc64le build fails
+# tiktoken
+# https://github.com/SamuraiT/mecab-python3/issues/95
+# mecab-python3 # cannot eval xorqa
+# git+https://github.com/hamishivi/alpaca_farm.git # requires tiktoken
+
+# ppc64le has V100 mostly, cannot use flash attention anyways.
+# flash-attn
+# triton-pre-mlir@git+https://github.com/vchiley/triton.git@triton_pre_mlir_sm90#subdirectory=python
+
+# install deepspeed according to https://docs.google.com/document/d/136VZGFKlylkcKqXDZDIu1-584GWscYvn0n1oAik9qZs/edit if needed.
+# deepspeed==0.9.1
+
