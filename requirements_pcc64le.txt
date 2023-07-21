@@ -1,3 +1,5 @@
+-e /gpfs/u/scratch/PTFM/PTFMqngp/github/rosemary
+-e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023
 /gpfs/u/home/PTFM/PTFMqngp/scratch/tools/torch-2.1.0a0+gita37b4fa-cp310-cp310-linux_ppc64le.whl
 sentencepiece
 ninja
@@ -8,6 +10,7 @@ evaluate
 tokenizers
 protobuf
 transformers
+charset-normalizer==3.1.0 # this version works as dependency of `datasets`
 datasets
 huggingface_hub
 openai
