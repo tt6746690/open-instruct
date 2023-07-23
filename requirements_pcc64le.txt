@@ -5,7 +5,6 @@ sentencepiece
 ninja
 accelerate
 git+https://github.com/huggingface/peft.git
-bitsandbytes
 evaluate
 tokenizers
 protobuf
@@ -38,6 +37,9 @@ pynvml
 # ppc64le has V100 mostly, cannot use flash attention anyways.
 # flash-attn
 # triton-pre-mlir@git+https://github.com/vchiley/triton.git@triton_pre_mlir_sm90#subdirectory=python
+
+# bitsandbytes has trouble setup cuda. didn't figure out how to compile from source either.
+# bitsandbytes
 
 # install deepspeed according to https://docs.google.com/document/d/136VZGFKlylkcKqXDZDIu1-584GWscYvn0n1oAik9qZs/edit if needed.
 # deepspeed==0.9.1

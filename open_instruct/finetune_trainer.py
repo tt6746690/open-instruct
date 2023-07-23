@@ -11,6 +11,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 from functools import partial
+import pyarrow
 import datasets
 import torch
 from datasets import load_dataset
@@ -456,7 +457,9 @@ class DataTrainingArguments:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
 
+from torch.distributed.elastic.multiprocessing.errors import record
 
+@record
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
@@ -578,7 +581,7 @@ def main():
             use_auth_token=True if model_args.use_auth_token else None,
             torch_dtype=torch_dtype,
             # wpq: 8bit training
-            load_in_8bit=model_args.load_in_8bit,
+            # load_in_8bit=model_args.load_in_8bit,
             trust_remote_code=bool('mpt' in model_args.model_name_or_path),
         )
     else:
