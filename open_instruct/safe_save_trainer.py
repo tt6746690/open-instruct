@@ -49,6 +49,7 @@ class SafeSaveTrainer(Trainer):
             or ShardedDDPOption.ZERO_DP_3 in self.args.sharded_ddp
             or self.fsdp is not None
         ):
+            # wpq: this is added in `finetune_trainer.py`
             full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
             with FSDP.state_dict_type(self.model, StateDictType.FULL_STATE_DICT, full_state_dict_config):
                 state_dict = self.model.state_dict()
