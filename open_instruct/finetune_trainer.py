@@ -4,6 +4,16 @@
 This file is modified from the huggingface example for finetuning language models
 [run_clm.py](https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py)
 """
+import os
+os.environ['TORCHELASTIC_ERROR_FILE'] = '/gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/open-instruct/scripts/error_file'
+
+## wpq: https cannot download huggingface's model related files
+#  - https://github.com/huggingface/transformers/issues/17611
+#  - downgrade  requests==2.29.0 to 2.27.1
+os.environ['CURL_CA_BUNDLE'] = ''
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+##
 
 import logging
 import os
@@ -11,10 +21,12 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 from functools import partial
+
 import pyarrow
 import datasets
 import torch
 from datasets import load_dataset
+from torch.distributed.elastic.multiprocessing.errors import record
 
 import transformers
 from transformers import (
@@ -34,7 +46,7 @@ from transformers import (
 )
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers.trainer_utils import get_last_checkpoint
-
+from transformers import Trainer
 
 ##### wpq: avoid import error
 # from safe_save_trainer import SafeSaveTrainer
@@ -60,24 +72,24 @@ else:
     IS_SAGEMAKER_MP_POST_1_10 = False
 
 
-### wpq: import for fix resuming PeftModel checkpoints in Trainer
-# https://github.com/huggingface/transformers/pull/24274/files
-from transformers.trainer import (
-    CONFIG_NAME, 
-    ADAPTER_WEIGHTS_NAME, 
-    ADAPTER_SAFE_WEIGHTS_NAME, 
-    WEIGHTS_INDEX_NAME,
-    SAFE_WEIGHTS_NAME,
-    SAFE_WEIGHTS_INDEX_NAME)
-from transformers import PretrainedConfig
-from transformers import __version__
-from transformers.utils import is_safetensors_available, is_peft_available
-if is_safetensors_available():
-    import safetensors.torch
-if is_peft_available():
-    from peft import PeftModel
-from transformers.modeling_utils import load_sharded_checkpoint
-###
+# ### wpq: import for fix resuming PeftModel checkpoints in Trainer
+# # https://github.com/huggingface/transformers/pull/24274/files
+# from transformers.trainer import (
+#     CONFIG_NAME, 
+#     ADAPTER_WEIGHTS_NAME, 
+#     ADAPTER_SAFE_WEIGHTS_NAME, 
+#     WEIGHTS_INDEX_NAME,
+#     SAFE_WEIGHTS_NAME,
+#     SAFE_WEIGHTS_INDEX_NAME)
+# from transformers import PretrainedConfig
+# from transformers import __version__
+# from transformers.utils import is_safetensors_available, is_peft_available
+# if is_safetensors_available():
+#     import safetensors.torch
+# if is_peft_available():
+#     from peft import PeftModel
+# from transformers.modeling_utils import load_sharded_checkpoint
+# ###
 
 logger = hf_logging.get_logger(__name__)
 
@@ -149,105 +161,107 @@ class SafeSaveTrainer(Trainer):
         if self.args.push_to_hub and not _internal_call:
             self.push_to_hub(commit_message="Model save")
 
+#     # fix resuming peftmodel checkpoint in Trainer `https://github.com/huggingface/transformers/pull/24274`
+#     # merged to main: Jun 20. latest v4.31.0 has the change
+#     # uncomment if use <v.4.31.0
+#     def _load_from_checkpoint(self, resume_from_checkpoint, model=None):
+#         if model is None:
+#             model = self.model
 
-    def _load_from_checkpoint(self, resume_from_checkpoint, model=None):
-        if model is None:
-            model = self.model
+#         config_file = os.path.join(resume_from_checkpoint, CONFIG_NAME)
+#         adapter_weights_file = os.path.join(resume_from_checkpoint, ADAPTER_WEIGHTS_NAME)
+#         adapter_safe_weights_file = os.path.join(resume_from_checkpoint, ADAPTER_SAFE_WEIGHTS_NAME)
+#         weights_file = os.path.join(resume_from_checkpoint, WEIGHTS_NAME)
+#         weights_index_file = os.path.join(resume_from_checkpoint, WEIGHTS_INDEX_NAME)
+#         safe_weights_file = os.path.join(resume_from_checkpoint, SAFE_WEIGHTS_NAME)
+#         safe_weights_index_file = os.path.join(resume_from_checkpoint, SAFE_WEIGHTS_INDEX_NAME)
 
-        config_file = os.path.join(resume_from_checkpoint, CONFIG_NAME)
-        adapter_weights_file = os.path.join(resume_from_checkpoint, ADAPTER_WEIGHTS_NAME)
-        adapter_safe_weights_file = os.path.join(resume_from_checkpoint, ADAPTER_SAFE_WEIGHTS_NAME)
-        weights_file = os.path.join(resume_from_checkpoint, WEIGHTS_NAME)
-        weights_index_file = os.path.join(resume_from_checkpoint, WEIGHTS_INDEX_NAME)
-        safe_weights_file = os.path.join(resume_from_checkpoint, SAFE_WEIGHTS_NAME)
-        safe_weights_index_file = os.path.join(resume_from_checkpoint, SAFE_WEIGHTS_INDEX_NAME)
+#         if not any(
+#             os.path.isfile(f)
+#             for f in [
+#                 weights_file,
+#                 safe_weights_file,
+#                 weights_index_file,
+#                 safe_weights_index_file,
+#                 adapter_weights_file,
+#                 adapter_safe_weights_file,
+#             ]
+#         ):
+#             raise ValueError(f"Can't find a valid checkpoint at {resume_from_checkpoint}")
 
-        if not any(
-            os.path.isfile(f)
-            for f in [
-                weights_file,
-                safe_weights_file,
-                weights_index_file,
-                safe_weights_index_file,
-                adapter_weights_file,
-                adapter_safe_weights_file,
-            ]
-        ):
-            raise ValueError(f"Can't find a valid checkpoint at {resume_from_checkpoint}")
+#         logger.info(f"Loading model from {resume_from_checkpoint}.")
 
-        logger.info(f"Loading model from {resume_from_checkpoint}.")
+#         if os.path.isfile(config_file):
+#             config = PretrainedConfig.from_json_file(config_file)
+#             checkpoint_version = config.transformers_version
+#             if checkpoint_version is not None and checkpoint_version != __version__:
+#                 logger.warning(
+#                     f"You are resuming training from a checkpoint trained with {checkpoint_version} of "
+#                     f"Transformers but your current version is {__version__}. This is not recommended and could "
+#                     "yield to errors or unwanted behaviors."
+#                 )
 
-        if os.path.isfile(config_file):
-            config = PretrainedConfig.from_json_file(config_file)
-            checkpoint_version = config.transformers_version
-            if checkpoint_version is not None and checkpoint_version != __version__:
-                logger.warning(
-                    f"You are resuming training from a checkpoint trained with {checkpoint_version} of "
-                    f"Transformers but your current version is {__version__}. This is not recommended and could "
-                    "yield to errors or unwanted behaviors."
-                )
+#         if os.path.isfile(weights_file) or os.path.isfile(safe_weights_file):
+#             # If the model is on the GPU, it still works!
+#             if is_sagemaker_mp_enabled():
+#                 if os.path.isfile(os.path.join(resume_from_checkpoint, "user_content.pt")):
+#                     # If the 'user_content.pt' file exists, load with the new smp api.
+#                     # Checkpoint must have been saved with the new smp api.
+#                     smp.resume_from_checkpoint(
+#                         path=resume_from_checkpoint, tag=WEIGHTS_NAME, partial=False, load_optimizer=False
+#                     )
+#                 else:
+#                     # If the 'user_content.pt' file does NOT exist, load with the old smp api.
+#                     # Checkpoint must have been saved with the old smp api.
+#                     if hasattr(self.args, "fp16") and self.args.fp16 is True:
+#                         logger.warning(
+#                             "Enabling FP16 and loading from smp < 1.10 checkpoint together is not suppported."
+#                         )
+#                     state_dict = torch.load(weights_file, map_location="cpu")
+#                     # Required for smp to not auto-translate state_dict from hf to smp (is already smp).
+#                     state_dict["_smp_is_partial"] = False
+#                     load_result = model.load_state_dict(state_dict, strict=True)
+#                     # release memory
+#                     del state_dict
+#             elif self.is_fsdp_enabled:
+#                 from accelerate.utils import load_fsdp_model
+#                 load_fsdp_model(self.accelerator.state.fsdp_plugin, self.accelerator, model, resume_from_checkpoint)
+#             else:
+#                 # We load the model state dict on the CPU to avoid an OOM error.
+#                 if self.args.save_safetensors and os.path.isfile(safe_weights_file):
+#                     state_dict = safetensors.torch.load_file(safe_weights_file, device="cpu")
+#                 else:
+#                     state_dict = torch.load(weights_file, map_location="cpu")
 
-        if os.path.isfile(weights_file) or os.path.isfile(safe_weights_file):
-            # If the model is on the GPU, it still works!
-            if is_sagemaker_mp_enabled():
-                if os.path.isfile(os.path.join(resume_from_checkpoint, "user_content.pt")):
-                    # If the 'user_content.pt' file exists, load with the new smp api.
-                    # Checkpoint must have been saved with the new smp api.
-                    smp.resume_from_checkpoint(
-                        path=resume_from_checkpoint, tag=WEIGHTS_NAME, partial=False, load_optimizer=False
-                    )
-                else:
-                    # If the 'user_content.pt' file does NOT exist, load with the old smp api.
-                    # Checkpoint must have been saved with the old smp api.
-                    if hasattr(self.args, "fp16") and self.args.fp16 is True:
-                        logger.warning(
-                            "Enabling FP16 and loading from smp < 1.10 checkpoint together is not suppported."
-                        )
-                    state_dict = torch.load(weights_file, map_location="cpu")
-                    # Required for smp to not auto-translate state_dict from hf to smp (is already smp).
-                    state_dict["_smp_is_partial"] = False
-                    load_result = model.load_state_dict(state_dict, strict=True)
-                    # release memory
-                    del state_dict
-            elif self.is_fsdp_enabled:
-                from accelerate.utils import load_fsdp_model
-                load_fsdp_model(self.accelerator.state.fsdp_plugin, self.accelerator, model, resume_from_checkpoint)
-            else:
-                # We load the model state dict on the CPU to avoid an OOM error.
-                if self.args.save_safetensors and os.path.isfile(safe_weights_file):
-                    state_dict = safetensors.torch.load_file(safe_weights_file, device="cpu")
-                else:
-                    state_dict = torch.load(weights_file, map_location="cpu")
+#                 # workaround for FSDP bug https://github.com/pytorch/pytorch/issues/82963
+#                 # which takes *args instead of **kwargs
+#                 load_result = model.load_state_dict(state_dict, False)
+#                 # release memory
+#                 del state_dict
+#                 self._issue_warnings_after_load(load_result)
 
-                # workaround for FSDP bug https://github.com/pytorch/pytorch/issues/82963
-                # which takes *args instead of **kwargs
-                load_result = model.load_state_dict(state_dict, False)
-                # release memory
-                del state_dict
-                self._issue_warnings_after_load(load_result)
-
-        # Load adapters following PR # 24096
-        elif is_peft_available() and isinstance(model, PeftModel):
-            # If train a model using PEFT & LoRA, assume that adapter have been saved properly.
-            if hasattr(model, "active_adapter") and hasattr(model, "load_adapter"):
-                if os.path.exists(resume_from_checkpoint):
-                    model.load_adapter(resume_from_checkpoint, model.active_adapter)
-                else:
-                    logger.warning(
-                        "The intermediate checkpoints of PEFT may not be saved correctly, "
-                        f"consider using a custom callback to save {ADAPTER_WEIGHTS_NAME} in corresponding saving folders. "
-                        "Check some examples here: https://github.com/huggingface/peft/issues/96"
-                    )
-            else:
-                logger.warning("Could not load adapter model, make sure to have `peft>=0.3.0` installed")
-        else:
-            # We load the sharded checkpoint
-            load_result = load_sharded_checkpoint(
-                model, resume_from_checkpoint, strict=is_sagemaker_mp_enabled(), prefer_safe=self.args.save_safetensors
-            )
-            if not is_sagemaker_mp_enabled():
-                self._issue_warnings_after_load(load_result)
-#####
+#         # Load adapters following PR # 24096
+#         elif is_peft_available() and isinstance(model, PeftModel):
+#             # If train a model using PEFT & LoRA, assume that adapter have been saved properly.
+#             if hasattr(model, "active_adapter") and hasattr(model, "load_adapter"):
+#                 if os.path.exists(resume_from_checkpoint):
+#                     model.load_adapter(resume_from_checkpoint, model.active_adapter)
+#                 else:
+#                     logger.warning(
+#                         "The intermediate checkpoints of PEFT may not be saved correctly, "
+#                         f"consider using a custom callback to save {ADAPTER_WEIGHTS_NAME} in corresponding saving folders. "
+#                         "Check some examples here: https://github.com/huggingface/peft/issues/96"
+#                     )
+#             else:
+#                 logger.warning("Could not load adapter model, make sure to have `peft>=0.3.0` installed")
+#         else:
+#             # We load the sharded checkpoint
+#             load_result = load_sharded_checkpoint(
+#                 model, resume_from_checkpoint, strict=is_sagemaker_mp_enabled(), prefer_safe=self.args.save_safetensors
+#             )
+#             if not is_sagemaker_mp_enabled():
+#                 self._issue_warnings_after_load(load_result)
+# #####
 
 
 
@@ -457,9 +471,8 @@ class DataTrainingArguments:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
 
-from torch.distributed.elastic.multiprocessing.errors import record
-
-@record
+# wpq: decorate for debugging distributed runs.
+# @record
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
@@ -590,6 +603,9 @@ def main():
         n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
         logger.info(f"Training new model from scratch - Total size={n_params/2**20:.2f}M params")
 
+    # wpq: `use_cache=True` is incompatible with gradient checkpointing
+    model.config.use_cache=False
+
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map 
     if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
@@ -692,6 +708,7 @@ def main():
     # initalize a trainer
     # here we use a custom trainer that moves the model to CPU when saving the checkpoint in FSDP mode
     # we can switch to the default trainer after moving to deepspeed (let's don't change too much for now)
+    # trainer = Trainer(
     trainer = SafeSaveTrainer(
         model=model,
         args=training_args,

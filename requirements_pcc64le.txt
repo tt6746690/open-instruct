@@ -24,7 +24,7 @@ einops
 auto-gptq
 fire
 flask
-tensorboard
+tensorboard==2.13.0
 omegaconf
 pynvml
 
