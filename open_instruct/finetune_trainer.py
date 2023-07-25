@@ -9,7 +9,7 @@ os.environ['TORCHELASTIC_ERROR_FILE'] = '/gpfs/u/scratch/PTFM/PTFMqngp/github/mi
 
 ## wpq: https cannot download huggingface's model related files
 #  - https://github.com/huggingface/transformers/issues/17611
-#  - downgrade  requests==2.29.0 to 2.27.1
+#  - downgrade  requests==2.29.0 to 2.27.1 (sideeffect: charset-normalizer==2.0.12)
 os.environ['CURL_CA_BUNDLE'] = ''
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
