@@ -556,9 +556,10 @@ def main():
     elif model_args.model_name_or_path:
         config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
         # wpq: add support for mpt models.
-        if 'mpt' in model_args.model_name_or_path:
-            config.attn_config['attn_impl'] = 'triton'
-            config.init_device = 'cuda' # For fast initialization directly on GPU!
+        # flash attention only works on a100 gpus! so just disable.
+        # if 'mpt' in model_args.model_name_or_path:
+        #     config.attn_config['attn_impl'] = 'triton'
+        #     config.init_device = 'cuda' # For fast initialization directly on GPU!
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this finetuning script."
