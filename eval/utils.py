@@ -277,6 +277,9 @@ def load_hf_lm_and_tokenizer(
                 **from_pretrained_kwargs,
             )
     model.eval()
+    # wpq: inference only, always `use_cache`
+    model.config.use_cache = True
+
     return model, tokenizer
 
 
