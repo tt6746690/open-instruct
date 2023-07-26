@@ -27,6 +27,7 @@ flask
 tensorboard==2.13.0
 omegaconf
 pynvml
+openai
 
 # ppc64le build fails
 # tiktoken

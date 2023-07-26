@@ -4,9 +4,10 @@ import re
 import json
 import tqdm
 import glob
-import torch
 import random
+import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import evaluate
+import torch
 from eval.utils import (
     load_hf_lm_and_tokenizer,
     generate_completions,
@@ -15,7 +16,6 @@ from eval.utils import (
 )
 
 
-    
 
 def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None, exact_match=None):
     targets = [example["target"] for example in examples]
