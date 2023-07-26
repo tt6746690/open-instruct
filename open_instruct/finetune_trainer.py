@@ -682,7 +682,9 @@ def main():
     
 
     # To speed up this part, we use multiprocessing.
-    with training_args.main_process_first(desc="Processing instruction data"):
+    # wpq: set `local=False` in multi-node environment so that the main process
+    # of the first node will do the processing, given the filesystem is shared by nodes.
+    with training_args.main_process_first(local=False, desc="Processing instruction data"):
         if not data_args.streaming:
             lm_datasets = raw_datasets.map(
                 encode_function,
