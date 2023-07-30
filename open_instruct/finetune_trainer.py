@@ -14,7 +14,7 @@ os.environ['CURL_CA_BUNDLE'] = ''
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 ##
-
+from collections import Counter
 import logging
 import os
 import sys
@@ -25,6 +25,7 @@ from functools import partial
 import pyarrow
 import datasets
 import torch
+import numpy as np
 from datasets import load_dataset
 from torch.distributed.elastic.multiprocessing.errors import record
 
@@ -462,6 +463,9 @@ class DataTrainingArguments:
             "help": ("The maximum total input sequence length after tokenization. Sequences longer than this will be truncated,")
         },
     )
+    subsample_mixture: Optional[str] = field(
+        default=None,
+    )
 
     def __post_init__(self):
         if self.dataset_name is None and self.train_file is None:
@@ -479,6 +483,12 @@ def main():
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+    # wpq: convert str to dict
+    if data_args.subsample_mixture is not None:
+        import json
+        data_args.subsample_mixture = json.loads(data_args.subsample_mixture)
+
 
     # Setup logging
     logging.basicConfig(
@@ -704,6 +714,20 @@ def main():
         if "train" not in raw_datasets:
             raise ValueError("--do_train requires a train dataset")
         train_dataset = lm_datasets["train"]
+        ## wpq: subsample `dataset` according to `data_args.subsample_mixture`.
+        # assumes dataset in `train_file` ordered, 
+        # e.g., ['cot', 'cot', 'flan_v2', 'flan_v2', ...]
+        # note `counts.items()` is ordered as well!
+        if data_args.subsample_mixture is not None:
+            counts = Counter(train_dataset['dataset'])
+            inds = []
+            cum = 0
+            for k, N in counts.items():
+                n = data_args.subsample_mixture[k]
+                inds += list(np.random.choice(N, size=n, replace=True if n>N else False) + cum)
+                cum += N
+            train_dataset = train_dataset.select(inds)
+        ## 
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
