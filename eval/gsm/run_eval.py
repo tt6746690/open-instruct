@@ -34,35 +34,8 @@ def main(args):
     if args.max_num_examples and len(test_data) > args.max_num_examples:
         test_data = random.sample(test_data, args.max_num_examples)
         
-
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir, exist_ok=True)
-
-    global GSM_EXAMPLARS
-    if args.n_shot:
-        if len(GSM_EXAMPLARS) > args.n_shot:
-            GSM_EXAMPLARS = random.sample(GSM_EXAMPLARS, args.n_shot)
-        demonstrations = []
-        for example in GSM_EXAMPLARS:
-            if args.no_cot:
-                demonstrations.append(
-                    "Quesion: " + example["question"] + "\n" + "Answer: " + example["short_answer"]
-                )
-            else:
-                demonstrations.append(
-                    "Question: " + example["question"] + "\n" + "Answer: " + example["cot_answer"]
-                )
-        prompt_prefix = "Answer the following questions.\n\n" + "\n\n".join(demonstrations) + "\n\n"
-    else:
-        prompt_prefix = "Answer the following question.\n\n"
-
-    prompts = []
-    for example in test_data:
-        if args.use_chat_format:
-            prompt = "<|user|>\n" + prompt_prefix + "Question: " + example["question"].strip() + "\n<|assistant|>\n" + "Answer:"
-        else:
-            prompt = prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:"
-        prompts.append(prompt)
 
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
@@ -73,18 +46,59 @@ def main(args):
             gptq_model=args.gptq,
             use_fast_tokenizer=True,
         )
+        
+    def get_prompt_prefix(n_shot):
+        global GSM_EXAMPLARS
+        if n_shot:
+            if len(GSM_EXAMPLARS) > n_shot:
+                examples = random.sample(GSM_EXAMPLARS, n_shot)
+            else:
+                examples = GSM_EXAMPLARS
+            demonstrations = []
+            for example in examples:
+                if args.no_cot:
+                    demonstrations.append(
+                        "Quesion: " + example["question"] + "\n" + "Answer: " + example["short_answer"]
+                    )
+                else:
+                    demonstrations.append(
+                        "Question: " + example["question"] + "\n" + "Answer: " + example["cot_answer"]
+                    )
+            prompt_prefix = "Answer the following questions.\n\n" + "\n\n".join(demonstrations) + "\n\n"
+        else:
+            prompt_prefix = "Answer the following question.\n\n"
+        return prompt_prefix
+
+    # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
+    if isinstance(model, GPT2LMHeadModel):
+        max_input_seq_len = model.config.max_position_embeddings - args.max_new_tokens
+    else:
+        max_input_seq_len = 2048 - args.max_new_tokens
+
+    prompts = []
+    for example in test_data:
+        ## wpq: Use <n_shot prompt if exceeds `max_input_seq_len`.
+        for n_shot in list(range(args.n_shot+1)[::-1]):
+            prompt_prefix = get_prompt_prefix(n_shot)
+            if args.use_chat_format:
+                prompt = "<|user|>\n" + prompt_prefix + "Question: " + example["question"].strip() + "\n<|assistant|>\n" + "Answer:"
+            else:
+                prompt = prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:"
+            tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
+            if tokenized_prompt_len < max_input_seq_len:
+                break
+        if n_shot != args.n_shot:
+            print(f'n_shot: {args.n_shot} -> {n_shot}')
+        prompts.append(prompt)
+
+    if args.model_name_or_path:
         # get the last token because the tokenizer may add space tokens at the start.
         # wpq: t5 tokenizer strips `\n`. don't use `\n` as stop sequence. just generate to max length or encounters <\s>. 
         new_line_token = tokenizer.encode("\n", add_special_tokens=False)
         stop_id_sequences = [[new_line_token[-1]]] if new_line_token else None
 
-        from transformers import GPT2LMHeadModel
-        if isinstance(model, GPT2LMHeadModel):
-            # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
-            generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
-        else:
-            # wpq: modify `max_new_tokens=512` to `256` for faster generation.
-            generation_kwargs = {'max_new_tokens': 512}
+        # wpq: modify `max_new_tokens=512` to `256` for faster generation.
+        generation_kwargs = {'max_new_tokens': args.max_new_tokens}
 
         outputs = generate_completions(
             model=model,
@@ -151,6 +165,9 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--n_shot", type=int, default=3)
+
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.

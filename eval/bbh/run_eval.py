@@ -9,20 +9,32 @@ import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put bef
 import evaluate
 import torch
 from eval.utils import load_hf_lm_and_tokenizer, generate_completions, query_openai_chat_model
+from transformers import GPT2LMHeadModel
 
 
-
-def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None, exact_match=None):
+def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None, exact_match=None, max_input_seq_len=None):
     targets = [example["target"] for example in examples]
     if save_path:
         fout = open(save_path, "w")
 
+    def get_task_prompt(n_shot):
+        assert(0 <= n_shot <= 3)
+        return "\n\n".join(task_prompt[:n_shot+1]).strip()
+
+    ## wpq: for k=3 shots, reduce number of demonstrations if the prompt is too long.
     prompts = []
     for example in examples:
-        if args.use_chat_format:
-            prompt = "<|user|>\n" + task_prompt.strip() + "\n\nQ: " + example["input"] + "\n<|assistant|>\nA:"
-        else:
-            prompt = task_prompt.strip() + "\n\nQ: " + example["input"] + "\nA:"
+        for n_shot in list(range(args.n_shot+1)[::-1]):
+            task_prompt_concat = get_task_prompt(n_shot)
+            if args.use_chat_format:
+                prompt = "<|user|>\n" + task_prompt_concat + "\n\nQ: " + example["input"] + "\n<|assistant|>\nA:"
+            else:
+                prompt = task_prompt_concat + "\n\nQ: " + example["input"] + "\nA:"
+            tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
+            if tokenized_prompt_len < max_input_seq_len:
+                break
+        if n_shot != args.n_shot:
+            print(f'n_shot: {args.n_shot} -> {n_shot}')
         prompts.append(prompt)
 
     if args.no_cot:
@@ -35,14 +47,9 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None,
         # instead, we'll do some post-processing to extract the answer.
         stop_id_sequences = None
 
-    from transformers import GPT2LMHeadModel
-    if isinstance(model, GPT2LMHeadModel):
-        # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
-        generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
-    else:
-        # wpq: modify `max_new_tokens=512` to `128` for faster generation.
-        # for non-cot multiple choice answers, e.g., ' (G).' requires just 5 tokens
-        generation_kwargs = {'max_new_tokens': 10 if args.no_cot else 512}
+    # wpq: modify `max_new_tokens=512` to `256` for faster generation.
+    # for non-cot multiple choice answers, e.g., ' (G).' requires just 5 tokens
+    generation_kwargs = {'max_new_tokens': 10 if args.no_cot else args.max_new_tokens}
 
     batch_size = args.eval_batch_size if args.eval_batch_size else 1
 
@@ -146,23 +153,44 @@ def main(args):
         with open(cot_prompt_file, "r") as f:
             task_name = os.path.basename(cot_prompt_file).split(".")[0]
             task_prompt = "".join(f.readlines()[2:])
-            if args.no_cot:
-                prompt_fields = task_prompt.split("\n\n")
-                new_prompt_fields = []
-                for prompt_field in prompt_fields:
-                    if prompt_field.startswith("Q:"):
-                        assert "So the answer is" in prompt_field, f"`So the answer is` not found in prompt field of {task_name}.txt."
-                        assert "\nA:" in prompt_field, "`\nA:` not found in prompt field."
-                        answer = prompt_field.split("So the answer is")[-1].strip()
-                        question = prompt_field.split("\nA:")[0].strip()
-                        new_prompt_fields.append(question + "\nA: " + answer)
-                    else:
-                        new_prompt_fields.append(prompt_field)
-                task_prompt = "\n\n".join(new_prompt_fields)
-            all_prompts[task_name] = task_prompt
 
-    assert set(all_tasks.keys()) == set(all_prompts.keys()), "task names in task data and task prompts are not the same."
-
+            prompt_fields = task_prompt.split("\n\n")
+            # `new_prompt_fields[0]`: sub-task instruction/description
+            # `new_prompt_fields[1:]`: demonstrations
+            new_prompt_fields = []
+            for prompt_field in prompt_fields:
+                if prompt_field.startswith("Q:"):
+                    assert "So the answer is" in prompt_field, f"`So the answer is` not found in prompt field of {task_name}.txt."
+                    assert "\nA:" in prompt_field, "`\nA:` not found in prompt field."
+                    question, answer = prompt_field.split("\nA:")
+                    question, answer = question.strip(), answer.strip()
+                    if args.no_cot:
+                        answer = answer.split("So the answer is")[-1].strip()
+                    new_prompt_fields.append(question+'\nA: '+answer)
+                else:
+                    new_prompt_fields.append(prompt_field)
+            # prompt instruction span two lines! concat them.
+            if task_name == 'snarks':
+                new_prompt_fields = ['\n\n'.join(new_prompt_fields[:2])]+new_prompt_fields[2:]
+            assert(len(new_prompt_fields) == 4)
+            all_prompts[task_name] = new_prompt_fields
+    #     with open(cot_prompt_file, "r") as f:
+    #         task_name = os.path.basename(cot_prompt_file).split(".")[0]
+    #         task_prompt = "".join(f.readlines()[2:])
+    #         if args.no_cot:
+    #             prompt_fields = task_prompt.split("\n\n")
+    #             new_prompt_fields = []
+    #             for prompt_field in prompt_fields:
+    #                 if prompt_field.startswith("Q:"):
+    #                     assert "So the answer is" in prompt_field, f"`So the answer is` not found in prompt field of {task_name}.txt."
+    #                     assert "\nA:" in prompt_field, "`\nA:` not found in prompt field."
+    #                     answer = prompt_field.split("So the answer is")[-1].strip()
+    #                     question = prompt_field.split("\nA:")[0].strip()
+    #                     new_prompt_fields.append(question + "\nA: " + answer)
+    #                 else:
+    #                     new_prompt_fields.append(prompt_field)
+    #             task_prompt = "\n\n".join(new_prompt_fields)
+    #         all_prompts[task_name] = task_prompt
     os.makedirs(args.save_dir, exist_ok=True)
     os.makedirs(os.path.join(args.save_dir, "predictions"), exist_ok=True)
 
@@ -176,6 +204,12 @@ def main(args):
             use_fast_tokenizer=True,
         )
 
+    # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
+    if isinstance(model, GPT2LMHeadModel):
+        max_input_seq_len = model.config.max_position_embeddings - args.max_new_tokens
+    else:
+        max_input_seq_len = 2048 - args.max_new_tokens
+
     performance = {}
     for task_name in tqdm.tqdm(all_tasks.keys(), desc="Evaluating"):
         task_examples = all_tasks[task_name]
@@ -185,10 +219,11 @@ def main(args):
                 args, 
                 model, 
                 tokenizer, 
-                task_examples, 
+                task_examples,
                 prompt, 
                 save_path=os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl"),
                 exact_match=exact_match,
+                max_input_seq_len=max_input_seq_len,
             )
         else:
             task_perf = eval_openai_chat_engine(
@@ -220,6 +255,9 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--n_shot", type=int, default=3)
+
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.

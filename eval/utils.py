@@ -43,6 +43,9 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
         batch_input_ids = tokenized_prompts.input_ids
         attention_mask = tokenized_prompts.attention_mask
 
+        if batch_input_ids.shape[-1] > 1024:
+            print(batch_input_ids.shape)
+
         if model.device.type == "cuda":
             batch_input_ids = batch_input_ids.cuda()
             attention_mask = attention_mask.cuda()
@@ -116,12 +119,15 @@ def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=Non
         tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=False)
         batch_input_ids = tokenized_prompts.input_ids
         attention_mask = tokenized_prompts.attention_mask
+        if batch_input_ids.shape[-1] > 1023:
+            print('here: ', batch_input_ids.shape)
 
         if model.device.type == "cuda":
             batch_input_ids = batch_input_ids.cuda()
             attention_mask = attention_mask.cuda()
 
-        batch_logits = model(batch_input_ids, attention_mask).logits[:, -1, :]
+        batch_logits = model(input_ids=batch_input_ids,
+                             attention_mask=attention_mask).logits[:, -1, :]
         if candidate_token_ids is not None:
             batch_logits = batch_logits[:, candidate_token_ids]
         batch_probs = torch.softmax(batch_logits, dim=-1)

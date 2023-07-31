@@ -1,12 +1,12 @@
 import argparse
-import os
+import os; os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 import json
 import random
 import torch
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
 from eval.codex_humaneval.data import write_jsonl, read_problems
 from eval.codex_humaneval.evaluation import evaluate_functional_correctness
-
+from transformers import GPT2LMHeadModel
 
 def main(args):
     random.seed(42)
@@ -46,7 +46,6 @@ def main(args):
         # to be consistent, we add a space before tokenization and remove it after tokenization.
         stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]
 
-        from transformers import GPT2LMHeadModel
         if isinstance(model, GPT2LMHeadModel):
             generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
         else:
