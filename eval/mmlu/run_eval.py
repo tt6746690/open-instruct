@@ -1,3 +1,4 @@
+
 import argparse
 import os
 import torch
@@ -8,8 +9,13 @@ import json
 from tqdm import tqdm
 import time
 from eval.mmlu.categories import subcategories, categories
+<<<<<<< HEAD
 from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 
+=======
+from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model
+from transformers import GPT2LMHeadModel
+>>>>>>> 6fa1758... adapt eval to gpt2
 
 choices = ["A", "B", "C", "D"]
 
@@ -45,12 +51,13 @@ def gen_prompt(train_df, subject, k=-1):
 
 
 @torch.inference_mode()
-def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
+def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1, max_input_seq_len=2048):
+
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for i in range(0, test_df.shape[0]):
-        k = args.ntrain
         prompt_end = format_example(test_df, i, include_answer=False)
+<<<<<<< HEAD
         train_prompt = gen_prompt(dev_df, subject, k)
         prompt = train_prompt + prompt_end
 
@@ -78,6 +85,30 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
                     prompt += " The answer is:"
                     
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
+=======
+        for k in list(range(-1, args.ntrain+1)[::-1]):
+            ## wpq: in case zero-shot ICL exceeds `max_input_seq_len`
+            # truncate the question on the left.
+            if k == -1:
+                tokenized_prompt_end = tokenizer(prompt_end, return_tensors="pt", add_special_tokens=False).input_ids
+                if args.use_chat_format:
+                    prompt_other_than_prompt_end = "<|user|>\n"+train_prompt+"\n<|assistant|>\nThe answer is:"
+                else:
+                    prompt_other_than_prompt_end = train_prompt
+                tokenized_prompt_other_than_prompt_end = tokenizer(prompt_other_than_prompt_end, return_tensors="pt", add_special_tokens=False).input_ids
+                train_prompt_max_len = max_input_seq_len-tokenized_prompt_other_than_prompt_end.shape[-1]
+                prompt_end = tokenizer.decode(tokenized_prompt_end.squeeze()[-train_prompt_max_len:], skip_special_tokens=False)
+                print(f'Truncate question #{i}: seq_len = {tokenized_prompt.shape[-1]} -> {max_input_seq_len}')
+            
+            train_prompt = gen_prompt(dev_df, subject, k)
+            prompt = train_prompt + prompt_end
+            if args.use_chat_format:
+                prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
+                
+            tokenized_prompt = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids
+            if tokenized_prompt.shape[-1] <= max_input_seq_len:
+                break
+>>>>>>> 6fa1758... adapt eval to gpt2
         prompts.append(prompt)
 
     # get the answer for all examples
@@ -172,6 +203,12 @@ def main(args):
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
+    # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
+    if isinstance(model, GPT2LMHeadModel):
+        max_input_seq_len = model.config.max_position_embeddings-1
+    else:
+        max_input_seq_len = 2048-1
+
     all_cors = []
     subcat_cors = {
         subcat: [] for subcat_lists in subcategories.values() for subcat in subcat_lists
@@ -190,7 +227,7 @@ def main(args):
             test_df = test_df.sample(args.n_instances, random_state=42)
 
         if args.model_name_or_path:
-            cors, acc, probs = eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, args.eval_batch_size)
+            cors, acc, probs = eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, args.eval_batch_size, max_input_seq_len=max_input_seq_len)
         else:
             cors, acc, probs = eval_openai_chat_engine(args, subject, args.openai_engine, dev_df, test_df, args.eval_batch_size)
             

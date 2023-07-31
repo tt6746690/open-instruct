@@ -1,5 +1,5 @@
 import argparse
-import os
+import os; os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 import json
 import random
 import torch
@@ -12,7 +12,7 @@ from eval.utils import (
 )
 from eval.codex_humaneval.data import write_jsonl, read_problems
 from eval.codex_humaneval.evaluation import evaluate_functional_correctness
-
+from transformers import GPT2LMHeadModel
 
 def main(args):
     random.seed(42)
