@@ -18,7 +18,9 @@ from collections import Counter
 import logging
 import os
 import sys
-from dataclasses import dataclass, field
+import json
+import re
+from dataclasses import dataclass, field, asdict
 from typing import Optional
 from functools import partial
 
@@ -486,8 +488,22 @@ def main():
 
     # wpq: convert str to dict
     if data_args.subsample_mixture is not None:
-        import json
+        data_args.subsample_mixture = re.compile('(?<!\\\\)\'').sub('\"', data_args.subsample_mixture)
         data_args.subsample_mixture = json.loads(data_args.subsample_mixture)
+        print('subsample mixture:')
+        print(data_args.subsample_mixture)
+
+    # wpq: save args to a json file
+    with training_args.main_process_first(local=False, desc=f"Saving args to `{training_args.output_dir+'.args.json'}`"):
+        args_dict = {
+            'model_args': asdict(model_args),
+            'data_args': asdict(data_args),
+            'training_args': asdict(training_args),
+        }
+        args_dict_path = training_args.output_dir+'.args.json'
+        with open(args_dict_path, 'w') as f:
+            json.dump(args_dict, f)
+        print(f'Saving args dict to {args_dict_path}')
 
 
     # Setup logging
@@ -723,7 +739,7 @@ def main():
             inds = []
             cum = 0
             for k, N in counts.items():
-                n = data_args.subsample_mixture[k]
+                n = int(data_args.subsample_mixture.get(k, 0))
                 inds += list(np.random.choice(N, size=n, replace=True if n>N else False) + cum)
                 cum += N
             train_dataset = train_dataset.select(inds)
@@ -778,6 +794,11 @@ def main():
         trainer.push_to_hub(**kwargs)
     else:
         trainer.create_model_card(**kwargs)
+
+    with training_args.main_process_first(local=False, desc=f"Moving args to `{training_args.output_dir}`"):
+        args_dict_path = training_args.output_dir+'.args.json'
+        if os.path.isfile(args_dict_path) and os.path.isdir(training_args.output_dir):
+            os.rename(args_dict_path, os.path.join(training_args.output_dir, 'ft_args.json'))
 
 
 if __name__ == "__main__":
