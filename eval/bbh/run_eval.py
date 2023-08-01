@@ -17,7 +17,7 @@ from eval.utils import (
 )
 
 
-def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None, exact_match=None, max_input_seq_len=None):
+def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None, max_input_seq_len=None):
     targets = [example["target"] for example in examples]
     if save_path:
         fout = open(save_path, "w")
@@ -93,10 +93,10 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None,
             fout.write(json.dumps(example) + "\n")        
 
     assert len(predictions) == len(targets), "number of predictions and targets are not the same."
-    return exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
+    return args.exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
 
 
-def eval_openai_chat_engine(args, examples, task_prompt, save_path=None, exact_match=None):
+def eval_openai_chat_engine(args, examples, task_prompt, save_path=None):
     targets = [example["target"] for example in examples]
     instances = []
     for i, example in enumerate(examples):
@@ -138,15 +138,11 @@ def eval_openai_chat_engine(args, examples, task_prompt, save_path=None, exact_m
             fout.write(json.dumps(example) + "\n")        
 
     assert len(predictions) == len(targets), "number of predictions and targets are not the same."
-    return exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
+    return args.exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
 
 
 def main(args):
     random.seed(42)
-    # wpq: prevents the following error.
-    # `ValueError: Error in finalize: another evaluation module instance is already using the local cache file. Please specify an experiment_id to avoid collision between distributed evaluation module instances.`
-    exact_match = evaluate.load(
-        "exact_match", experiment=args.model_name_or_path+('_chatfmt' if args.use_chat_format else ''))
 
     all_tasks = {}
     task_files = glob.glob(os.path.join(args.data_dir, "bbh", "*.json"))
@@ -233,7 +229,6 @@ def main(args):
                 task_examples,
                 prompt, 
                 save_path=os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl"),
-                exact_match=exact_match,
                 max_input_seq_len=max_input_seq_len,
             )
         else:
@@ -242,7 +237,6 @@ def main(args):
                 task_examples,
                 prompt,
                 save_path=os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl"),
-                exact_match=exact_match,
             )
         performance[task_name] = task_perf
         print(f"Task {task_name} - EM: {task_perf}")
@@ -271,6 +265,10 @@ if __name__ == "__main__":
     parser.add_argument("--n_shot", type=int, default=3)
 
     args = parser.parse_args()
+
+    # wpq: prevents the following error.
+    # `ValueError: Error in finalize: another evaluation module instance is already using the local cache file. Please specify an experiment_id to avoid collision between distributed evaluation module instances.`
+    args.exact_match = evaluate.load("exact_match", experiment_id=args.save_dir)
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."
