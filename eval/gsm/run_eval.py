@@ -166,7 +166,6 @@ if __name__ == "__main__":
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
     parser.add_argument("--max_new_tokens", type=int, default=256)
-    parser.add_argument("--n_shot", type=int, default=3)
 
     args = parser.parse_args()
 

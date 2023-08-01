@@ -5,7 +5,7 @@ import random
 import evaluate
 import numpy as np
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
-
+from transformers import GPT2LMHeadModel
 
 encoding_templates_with_context = {
     "english": ("Answer the following question based on the information in the given passage.", "Passage:", "Question:", "Answer:"),
@@ -118,42 +118,61 @@ def main(args):
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir, exist_ok=True)
 
+    # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
+    if isinstance(model, GPT2LMHeadModel):
+        max_input_seq_len = model.config.max_position_embeddings - args.max_new_tokens
+    else:
+        max_input_seq_len = 2048 - args.max_new_tokens
+
+
     prompts = []
+    num_use_less_shots = 0
     for example in test_data:
         lang = example["lang"]
-
-        if args.no_context:
-            prompt, q_template, a_template = encoding_templates_without_context[lang]
-            p_template = ""
-        else:
-            prompt, p_template, q_template, a_template = encoding_templates_with_context[lang]
-
-        prompt += "\n\n"
         
-        if args.n_shot > 0:
-            formatted_demo_examples = []
-            for train_example in train_data_for_langs[lang]:
-                if args.no_context:
-                    formatted_demo_examples.append(
-                        q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
-                    )
-                else:
-                    formatted_demo_examples.append(
-                        p_template + " " + train_example["context"] + "\n" + q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
-                    )
-            prompt += "\n\n".join(formatted_demo_examples) + "\n\n"
-        
-        if args.no_context:
-            prompt += q_template + " " + format(example["question"]) + "\n"
-        else:
-            prompt += p_template + " " + format(example["context"]) + "\n" + q_template + " " + format(example["question"]) + "\n"
+        # wpq: use less demonstrations if exceeds context lengths.
+        for n_shot in list(range(args.n_shot+1)[::-1]):
+            if args.no_context:
+                prompt, q_template, a_template = encoding_templates_without_context[lang]
+                p_template = ""
+            else:
+                prompt, p_template, q_template, a_template = encoding_templates_with_context[lang]
 
-        if args.use_chat_format:
-            prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\n" + a_template
-        else:
-            prompt += a_template
-        
+            prompt += "\n\n"
+
+            if n_shot > 0:
+                formatted_demo_examples = []
+                for train_example in train_data_for_langs[lang]:
+                    if args.no_context:
+                        formatted_demo_examples.append(
+                            q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
+                        )
+                    else:
+                        formatted_demo_examples.append(
+                            p_template + " " + train_example["context"] + "\n" + q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
+                        )
+                prompt += "\n\n".join(formatted_demo_examples) + "\n\n"
+
+            if args.no_context:
+                prompt += q_template + " " + format(example["question"]) + "\n"
+            else:
+                prompt += p_template + " " + format(example["context"]) + "\n" + q_template + " " + format(example["question"]) + "\n"
+
+            if args.use_chat_format:
+                prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\n" + a_template
+            else:
+                prompt += a_template
+                
+            tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
+            if tokenized_prompt_len < max_input_seq_len:
+                break
+        if n_shot != args.n_shot:
+            num_use_less_shots += 1
+            print(f'n_shot: {args.n_shot} -> {n_shot}')
+
         prompts.append(prompt)
+        
+    print(f'frac test_data use less shots: {num_use_less_shots / len(test_data):.2f}')
 
     if args.model_name_or_path:
         new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
@@ -161,7 +180,7 @@ def main(args):
             model=model,
             tokenizer=tokenizer,
             prompts=prompts,
-            max_new_tokens=50,
+            max_new_tokens=args.max_new_tokens,
             batch_size=args.eval_batch_size,
             stop_id_sequences=[[new_line_token]]
         )
@@ -216,6 +235,8 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--max_new_tokens", type=int, default=50)
+
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."

@@ -19,10 +19,11 @@ def main(args):
         test_data = random.sample(test_data, args.max_num_examples)
     print("Number of examples:", len(test_data))
 
+    # wpq: remove `example["prompt"]` at the end! it's a bug.
     if args.use_chat_format:
         prompts = [
             "<|user|>\n" + "Complete the following python function.\n\n\n" 
-            + example["prompt"] + "\n<|assistant|>\n" + "Here is the completed function:\n\n\n" + example["prompt"]
+            + example["prompt"] + "\n<|assistant|>\n" + "Here is the completed function:\n\n\n"
             for example in test_data
         ]
     else:
@@ -127,6 +128,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="Load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."

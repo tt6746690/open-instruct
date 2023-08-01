@@ -31,7 +31,7 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None,
             else:
                 prompt = task_prompt_concat + "\n\nQ: " + example["input"] + "\nA:"
             tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
-            if tokenized_prompt_len < max_input_seq_len:
+            if tokenized_prompt_len <= max_input_seq_len:
                 break
         if n_shot != args.n_shot:
             print(f'n_shot: {args.n_shot} -> {n_shot}')
