@@ -10,9 +10,6 @@ from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_ope
 from eval.gsm.examplars import EXAMPLARS as GSM_EXAMPLARS
 
 
-exact_match = evaluate.load("exact_match")
-
-
 def main(args):
     random.seed(42)
 
@@ -131,7 +128,7 @@ def main(args):
     print("Calculating accuracy...")
     targets = [example["answer"] for example in test_data]
 
-    em_score = exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
+    em_score = args.exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
     print(f"Exact match : {em_score}")
 
     predictions = [{
@@ -168,6 +165,10 @@ if __name__ == "__main__":
     parser.add_argument("--max_new_tokens", type=int, default=256)
 
     args = parser.parse_args()
+
+    # wpq: prevents the following error.
+    # `ValueError: Error in finalize: another evaluation module instance is already using the local cache file. Please specify an experiment_id to avoid collision between distributed evaluation module instances.`
+    args.exact_match = evaluate.load("exact_match", experiment_id=args.save_dir)
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."

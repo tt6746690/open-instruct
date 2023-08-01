@@ -202,7 +202,9 @@ def main(args):
             fout.write(json.dumps(example) + "\n")
 
     print("Calculating F1, EM ...")
-    metric = evaluate.load("squad")
+    # wpq: prevents the following error.
+    # `ValueError: Error in finalize: another evaluation module instance is already using the local cache file. Please specify an experiment_id to avoid collision between distributed evaluation module instances.`
+    metric = evaluate.load("squad", experiment_id=args.save_dir)
     
     eval_scores = {}
     for lang in data_languages:
