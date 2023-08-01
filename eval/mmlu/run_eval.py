@@ -51,7 +51,7 @@ def gen_prompt(train_df, subject, k=-1):
 
 
 @torch.inference_mode()
-def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1, max_input_seq_len=2048):
+def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1, max_input_seq_len=2048-1):
 
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
@@ -106,7 +106,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
                 prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
                 
             tokenized_prompt = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids
-            if tokenized_prompt.shape[-1] <= max_input_seq_len:
+            if tokenized_prompt.shape[-1] < max_input_seq_len:
                 break
 >>>>>>> 6fa1758... adapt eval to gpt2
         prompts.append(prompt)

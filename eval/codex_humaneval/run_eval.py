@@ -25,6 +25,7 @@ def main(args):
         test_data = random.sample(test_data, args.max_num_examples)
     print("Number of examples:", len(test_data))
 
+    # wpq: remove `example["prompt"]` at the end! it's a bug.
     if args.use_chat_format:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
@@ -155,7 +156,10 @@ if __name__ == "__main__":
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_vllm", action="store_true", help="If given, we will use the vllm library, which will likely increase the inference throughput.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+<<<<<<< HEAD
     parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
+=======
+>>>>>>> 66b1e34... eval gpt2 code
 
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

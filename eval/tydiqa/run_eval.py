@@ -5,6 +5,7 @@ import random
 import torch
 import evaluate
 import numpy as np
+from transformers import GPT2LMHeadModel
 from eval.utils import (
     generate_completions, 
     load_hf_lm_and_tokenizer, 
@@ -126,47 +127,67 @@ def main(args):
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir, exist_ok=True)
 
+    # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
+    if isinstance(model, GPT2LMHeadModel):
+        max_input_seq_len = model.config.max_position_embeddings - args.max_new_tokens
+    else:
+        max_input_seq_len = 2048 - args.max_new_tokens
+
+
     prompts = []
+    num_use_less_shots = 0
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in test_data:
         lang = example["lang"]
-
-        if args.no_context:
-            prompt, q_template, a_template = encoding_templates_without_context[lang]
-            p_template = ""
-        else:
-            prompt, p_template, q_template, a_template = encoding_templates_with_context[lang]
-
-        prompt += "\n\n"
         
-        if args.n_shot > 0:
-            formatted_demo_examples = []
-            for train_example in train_data_for_langs[lang]:
-                if args.no_context:
-                    formatted_demo_examples.append(
-                        q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
-                    )
-                else:
-                    formatted_demo_examples.append(
-                        p_template + " " + train_example["context"] + "\n" + q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
-                    )
-            prompt += "\n\n".join(formatted_demo_examples) + "\n\n"
-        
-        if args.no_context:
-            prompt += q_template + " " + format(example["question"]) + "\n"
-        else:
-            prompt += p_template + " " + format(example["context"]) + "\n" + q_template + " " + format(example["question"]) + "\n"
-
-        if args.use_chat_format:
-            messages = [{"role": "user", "content": prompt}]
-            prompt = chat_formatting_function(messages, add_bos=False)
-            if prompt[-1] in ["\n", " "]:
-                prompt += a_template
+        # wpq: use less demonstrations if exceeds context lengths.
+        for n_shot in list(range(args.n_shot+1)[::-1]):
+            if args.no_context:
+                prompt, q_template, a_template = encoding_templates_without_context[lang]
+                p_template = ""
             else:
-                prompt += " " + a_template
-        else:
-            prompt += a_template
+                prompt, p_template, q_template, a_template = encoding_templates_with_context[lang]
+
+            prompt += "\n\n"
+
+            if n_shot > 0:
+                formatted_demo_examples = []
+                for train_example in train_data_for_langs[lang]:
+                    if args.no_context:
+                        formatted_demo_examples.append(
+                            q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
+                        )
+                    else:
+                        formatted_demo_examples.append(
+                            p_template + " " + train_example["context"] + "\n" + q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
+                        )
+                prompt += "\n\n".join(formatted_demo_examples) + "\n\n"
+
+            if args.no_context:
+                prompt += q_template + " " + format(example["question"]) + "\n"
+            else:
+                prompt += p_template + " " + format(example["context"]) + "\n" + q_template + " " + format(example["question"]) + "\n"
+
+            if args.use_chat_format:
+                messages = [{"role": "user", "content": prompt}]
+                prompt = chat_formatting_function(messages, add_bos=False)
+                if prompt[-1] in ["\n", " "]:
+                    prompt += a_template
+                else:
+                    prompt += " " + a_template
+            else:
+                prompt += a_template
+                
+            tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
+            if tokenized_prompt_len < max_input_seq_len:
+                break
+        if n_shot != args.n_shot:
+            num_use_less_shots += 1
+            print(f'n_shot: {args.n_shot} -> {n_shot}')
+
         prompts.append(prompt)
+        
+    print(f'frac test_data use less shots: {num_use_less_shots / len(test_data):.2f}')
 
     if args.model_name_or_path:
         new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
@@ -174,7 +195,7 @@ def main(args):
             model=model,
             tokenizer=tokenizer,
             prompts=prompts,
-            max_new_tokens=50,
+            max_new_tokens=args.max_new_tokens,
             batch_size=args.eval_batch_size,
             stop_id_sequences=[[new_line_token]]
         )
@@ -216,89 +237,22 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        default="data/xorqa/"
-    )
-    parser.add_argument(
-        "--max_num_examples_per_lang",
-        type=int,
-        default=None,
-        help="maximum number of examples per language to evaluate."
-    )
-    parser.add_argument(
-        "--n_shot",
-        type=int,
-        default=1,
-        help="number of examples to use for few-shot evaluation."
-    )
-    parser.add_argument(
-        "--no_context",
-        action="store_true",
-        help="If given, we're evaluating a model without the gold context passage."
-    )
-    parser.add_argument(
-        "--max_context_length",
-        type=int,
-        default=512,
-        help="maximum number of tokens in the context passage."
-    )
-    parser.add_argument(
-        "--save_dir",
-        type=str,
-        default="results/tydiqa/"
-    )
-    parser.add_argument(
-        "--model_name_or_path",
-        type=str,
-        default=None,
-        help="if specified, we will load the model to generate the predictions."
-    )
-    parser.add_argument(
-        "--tokenizer_name_or_path",
-        type=str,
-        default=None,
-        help="if specified, we will load the tokenizer from here."
-    )
-    parser.add_argument(
-        "--use_slow_tokenizer",
-        action="store_true",
-        help="If given, we will use the slow tokenizer."
-    )
-    parser.add_argument(
-        "--openai_engine",
-        type=str,
-        default=None,
-        help="if specified, we will use the OpenAI API to generate the predictions."
-    )
-    parser.add_argument(
-        "--eval_batch_size",
-        type=int,
-        default=1,
-        help="batch size for evaluation."
-    )
-    parser.add_argument(
-        "--load_in_8bit",
-        action="store_true",
-        help="load model in 8bit mode, which will reduce memory and speed up inference."
-    )
-    parser.add_argument(
-        "--gptq",
-        action="store_true",
-        help="If given, we're evaluating a 4-bit quantized GPTQ model."
-    )
-    parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
-        help="If given, we will use the chat format for the prompts."
-    )
-    parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
-    )
+    parser.add_argument("--data_dir", type=str, default="data/xorqa/")
+    parser.add_argument("--max_num_examples_per_lang", type=int, default=None, help="maximum number of examples per language to evaluate.")
+    parser.add_argument("--n_shot", type=int, default=1, help="number of examples to use for few-shot evaluation.")
+    parser.add_argument("--no_context", action="store_true", help="If given, we're evaluating a model without the gold context passage.")
+    parser.add_argument("--max_context_length", type=int, default=512, help="maximum number of tokens in the context passage.")
+    parser.add_argument("--save_dir", type=str, default="results/tydiqa/")
+    parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
+    parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
+    parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
+    parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
+    parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
+    parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
+    parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
+    parser.add_argument("--max_new_tokens", type=int, default=50)
+
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."
