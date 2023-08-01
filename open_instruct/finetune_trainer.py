@@ -502,7 +502,7 @@ def main():
         }
         args_dict_path = training_args.output_dir+'.args.json'
         with open(args_dict_path, 'w') as f:
-            json.dump(args_dict, f)
+            json.dump(args_dict, f, indent=4)
         print(f'Saving args dict to {args_dict_path}')
 
 
