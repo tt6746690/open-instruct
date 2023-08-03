@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
     # wpq: prevents the following error.
     # `ValueError: Error in finalize: another evaluation module instance is already using the local cache file. Please specify an experiment_id to avoid collision between distributed evaluation module instances.`
-    args.exact_match = evaluate.load("exact_match", experiment_id=args.save_dir)
+    args.exact_match = evaluate.load("exact_match", experiment_id=args.save_dir, keep_in_memory=True)
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."
