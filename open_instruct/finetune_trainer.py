@@ -631,7 +631,7 @@ def main():
         logger.info(f"Training new model from scratch - Total size={n_params/2**20:.2f}M params")
 
     # wpq: `use_cache=True` is incompatible with gradient checkpointing
-    model.config.use_cache=False
+    model.config.use_cache = True if not training_args.gradient_checkpointing else False
 
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map 
@@ -740,7 +740,9 @@ def main():
             cum = 0
             for k, N in counts.items():
                 n = int(data_args.subsample_mixture.get(k, 0))
-                inds += list(np.random.choice(N, size=n, replace=True if n>N else False) + cum)
+                replace = True if n>N else False
+                replace = True # always sample with replacement, for fairer comparison.
+                inds += list(np.random.choice(N, size=n, replace=replace) + cum)
                 cum += N
             train_dataset = train_dataset.select(inds)
         ## 

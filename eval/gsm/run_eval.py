@@ -169,6 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="results/mgsm")
     parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
+    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.")
     parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
     parser.add_argument("--n_shot", type=int, default=8, help="max number of examples to use for demonstration.")
     parser.add_argument("--no_cot", action="store_true", help="If given, we're evaluating a model without chain-of-thought.")

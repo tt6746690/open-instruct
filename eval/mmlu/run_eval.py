@@ -9,13 +9,8 @@ import json
 from tqdm import tqdm
 import time
 from eval.mmlu.categories import subcategories, categories
-<<<<<<< HEAD
 from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
-
-=======
-from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model
 from transformers import GPT2LMHeadModel
->>>>>>> 6fa1758... adapt eval to gpt2
 
 choices = ["A", "B", "C", "D"]
 
@@ -50,17 +45,14 @@ def gen_prompt(train_df, subject, k=-1):
     return prompt
 
 
+
+
 @torch.inference_mode()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1, max_input_seq_len=2048-1):
 
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
-    for i in range(0, test_df.shape[0]):
-        prompt_end = format_example(test_df, i, include_answer=False)
-<<<<<<< HEAD
-        train_prompt = gen_prompt(dev_df, subject, k)
-        prompt = train_prompt + prompt_end
-
+    def wrap_with_chat_format(prompt):
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, add_bos=False)
@@ -68,33 +60,15 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
                 prompt += "The answer is:"
             else:
                 prompt += " The answer is:"
-
-        tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
-        # make sure every prompt is less than 2048 tokens
-        while len(tokenized_prompt) > 2048:
-            k -= 1
-            train_prompt = gen_prompt(dev_df, subject, k)
-            prompt = train_prompt + prompt_end
-
-            if args.use_chat_format:
-                messages = [{"role": "user", "content": prompt}]
-                prompt = chat_formatting_function(messages, add_bos=False)
-                if prompt[-1] in ["\n", " "]:
-                    prompt += "The answer is:"
-                else:
-                    prompt += " The answer is:"
-                    
-            tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
-=======
+        return prompt
+    for i in range(0, test_df.shape[0]):
+        prompt_end = format_example(test_df, i, include_answer=False)
         for k in list(range(-1, args.ntrain+1)[::-1]):
             ## wpq: in case zero-shot ICL exceeds `max_input_seq_len`
             # truncate the question on the left.
             if k == -1:
                 tokenized_prompt_end = tokenizer(prompt_end, return_tensors="pt", add_special_tokens=False).input_ids
-                if args.use_chat_format:
-                    prompt_other_than_prompt_end = "<|user|>\n"+train_prompt+"\n<|assistant|>\nThe answer is:"
-                else:
-                    prompt_other_than_prompt_end = train_prompt
+                prompt_other_than_prompt_end = wrap_with_chat_format(train_prompt, args.use_chat_format, args.chat_format_version)
                 tokenized_prompt_other_than_prompt_end = tokenizer(prompt_other_than_prompt_end, return_tensors="pt", add_special_tokens=False).input_ids
                 train_prompt_max_len = max_input_seq_len-tokenized_prompt_other_than_prompt_end.shape[-1]
                 prompt_end = tokenizer.decode(tokenized_prompt_end.squeeze()[-train_prompt_max_len:], skip_special_tokens=False)
@@ -102,13 +76,11 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             
             train_prompt = gen_prompt(dev_df, subject, k)
             prompt = train_prompt + prompt_end
-            if args.use_chat_format:
-                prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
+            prompt = wrap_with_chat_format(prompt.strip(), args.use_chat_format, args.chat_format_version)
                 
             tokenized_prompt = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids
             if tokenized_prompt.shape[-1] < max_input_seq_len:
                 break
->>>>>>> 6fa1758... adapt eval to gpt2
         prompts.append(prompt)
 
     # get the answer for all examples
@@ -280,81 +252,20 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--ntrain",
-        type=int,
-        default=5
-    )
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        default="data/mmlu"
-    )
-    parser.add_argument(
-        "--save_dir",
-        type=str,
-        default="results/mmlu/llama-7B/"
-    )
-    parser.add_argument(
-        "--model_name_or_path",
-        type=str,
-        default=None,
-        help="if specified, we will load the model to generate the predictions."
-    )
-    parser.add_argument(
-        "--tokenizer_name_or_path",
-        type=str,
-        default=None,
-        help="if specified, we will load the tokenizer from here."
-    )
-    parser.add_argument(
-        "--use_slow_tokenizer",
-        action="store_true",
-        help="If given, we will use the slow tokenizer."
-    )
-    parser.add_argument(
-        "--openai_engine",
-        type=str,
-        default=None,
-        help="if specified, we will use the OpenAI API to generate the predictions."
-    )
-    parser.add_argument(
-        "--subjects",
-        nargs="*",
-        help="which subjects to evaluate. If not specified, all the 57 subjects will be evaluated."
-    )
-    parser.add_argument(
-        "--n_instances",
-        type=int,
-        help="if specified, a maximum of n_instances per subject will be used for the evaluation."
-    )
-    parser.add_argument(
-        "--eval_batch_size",
-        type=int,
-        default=1,
-        help="batch size for evaluation."
-    )
-    parser.add_argument(
-        "--load_in_8bit",
-        action="store_true",
-        help="load model in 8bit mode, which will reduce memory and speed up inference."
-    )
-    parser.add_argument(
-        "--gptq",
-        action="store_true",
-        help="If given, we're evaluating a 4-bit quantized GPTQ model."
-    )
-    parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
-        help="If given, we will use the chat format for the prompts."
-    )
-    parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
-    )
+    parser.add_argument("--ntrain", type=int, default=5)
+    parser.add_argument("--data_dir", type=str, default="data/mmlu")
+    parser.add_argument("--save_dir", type=str, default="results/mmlu/llama-7B/")
+    parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
+    parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
+    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.")
+    parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
+    parser.add_argument("--subjects", nargs="*", help="which subjects to evaluate. If not specified, all the 57 subjects will be evaluated.")
+    parser.add_argument("--n_instances", type=int, help="if specified, a maximum of n_instances per subject will be used for the evaluation.")
+    parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
+    parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
+    parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
+    parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
