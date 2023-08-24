@@ -45,6 +45,32 @@ def gen_prompt(train_df, subject, k=-1):
     return prompt
 
 
+def wrap_with_chat_format(prompt, use_chat_format, chat_format_version):
+
+    # wpq: try different prompts for mmlu
+    # v1: Answer:\n<|assistant|>\nThe answer is:
+    # v2: Answer:\n<|assistant>\n
+    # v3: <|assistant>\nAnswer:
+    # v4: <|assistant>\nThe answer is:
+    if use_chat_format:
+        if   chat_format_version == 1:
+            prompt = "<|user|>\n" + prompt + "\n<|assistant|>\nThe answer is:"
+        elif chat_format_version == 2:
+            prompt = "<|user|>\n" + prompt + "\n<|assistant|>\n"
+        elif chat_format_version == 3:
+            suffix = '\nAnswer:'
+            if prompt.endswith(suffix): prompt = prompt[:-len(suffix)]
+            prompt = "<|user|>\n" + prompt + "\n<|assistant|>\nAnswer:"
+        elif chat_format_version == 4:
+            suffix = '\nAnswer:'
+            if prompt.endswith(suffix): prompt = prompt[:-len(suffix)]
+            prompt = "<|user|>\n" + prompt + "\n<|assistant|>\nThe answer is:"
+        else:
+            raise ValueError(f'{chat_format_version} not supported.')
+
+    return prompt
+
+
 @torch.inference_mode()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1, max_input_seq_len=2048-1):
 
@@ -56,10 +82,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             # truncate the question on the left.
             if k == -1:
                 tokenized_prompt_end = tokenizer(prompt_end, return_tensors="pt", add_special_tokens=False).input_ids
-                if args.use_chat_format:
-                    prompt_other_than_prompt_end = "<|user|>\n"+train_prompt+"\n<|assistant|>\nThe answer is:"
-                else:
-                    prompt_other_than_prompt_end = train_prompt
+                prompt_other_than_prompt_end = wrap_with_chat_format(train_prompt, args.use_chat_format, args.chat_format_version)
                 tokenized_prompt_other_than_prompt_end = tokenizer(prompt_other_than_prompt_end, return_tensors="pt", add_special_tokens=False).input_ids
                 train_prompt_max_len = max_input_seq_len-tokenized_prompt_other_than_prompt_end.shape[-1]
                 prompt_end = tokenizer.decode(tokenized_prompt_end.squeeze()[-train_prompt_max_len:], skip_special_tokens=False)
@@ -67,8 +90,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             
             train_prompt = gen_prompt(dev_df, subject, k)
             prompt = train_prompt + prompt_end
-            if args.use_chat_format:
-                prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
+            prompt = wrap_with_chat_format(prompt.strip(), args.use_chat_format, args.chat_format_version)
                 
             tokenized_prompt = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids
             if tokenized_prompt.shape[-1] < max_input_seq_len:
@@ -258,6 +280,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--chat_format_version", type=int, default=0)
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
