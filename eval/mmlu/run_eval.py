@@ -48,7 +48,7 @@ def gen_prompt(train_df, subject, k=-1):
 def wrap_with_chat_format(prompt, use_chat_format, chat_format_version):
 
     # wpq: try different prompts for mmlu
-    # v1: Answer:\n<|assistant|>\nThe answer is:
+    # v1 (original): Answer:\n<|assistant|>\nThe answer is:
     # v2: Answer:\n<|assistant>\n
     # v3: <|assistant>\nAnswer:
     # v4: <|assistant>\nThe answer is:
@@ -280,7 +280,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
-    parser.add_argument("--chat_format_version", type=int, default=0)
+    parser.add_argument("--chat_format_version", type=int, default=1)
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
