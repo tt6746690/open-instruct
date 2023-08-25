@@ -46,7 +46,6 @@ def gen_prompt(train_df, subject, k=-1):
 
 
 
-
 @torch.inference_mode()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1, max_input_seq_len=2048-1):
 
@@ -265,7 +264,11 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+<<<<<<< HEAD
     parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
+=======
+    parser.add_argument("--chat_format_version", type=int, default=1)
+>>>>>>> 3e05f9b... add
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
