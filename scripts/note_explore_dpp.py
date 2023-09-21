@@ -8,6 +8,7 @@ from functools import partial
 import os
 import sys
 import numpy as np
+import time
 
 import pickle
 from tqdm import tqdm 
@@ -129,14 +130,36 @@ text_embeddings = d['text_embeddings'][:N,:]
 log_probs = d['log_probs'][:N,:].squeeze()
 
 
-text_embeddings /= np.linalg.norm(text_embeddings, axis=-1, keepdims=True)
-similarities = np.dot(text_embeddings, text_embeddings.T) # cosine sim
-probs = np.exp(log_probs)
+if True:
+    T = torch.from_numpy(text_embeddings).to('cuda')
+    logP = torch.from_numpy(log_probs).to('cuda')
+    
+    T = torch.nn.functional.normalize(T, dim=-1)
+    ## out-of-memory
+    # S = T@T.T
+    ## block-wise matmul to reduce peak memory usage.
+    L = []
+    for Tn in torch.split(T, 10000):
+        L.append((Tn@T.T).to('cpu'))
+    S = torch.vstack(L)
+    P = logP.exp().to('cpu')
 
-K_cos = similarities 
-K_cos_prob = probs.reshape(N, 1) * similarities * probs.reshape(1, N)
-K_cos_oneminusprob = (1-probs).reshape(N, 1) * similarities * (1-probs).reshape(1, N)
+    K_cos = S
+    K_cos_prob = P.reshape(N,1)*S*P.reshape(1,N)
+    K_cos_oneminusprob = (1-P).reshape(N,1)*S*(1-P).reshape(1,N)
+    
+    K_cos = K_cos.to('cpu').numpy()
+    K_cos_prob = K_cos_prob.to('cpu').numpy()
+    K_cos_oneminusprob = K_cos_oneminusprob.to('cpu').numpy()
+    
+else:
+    text_embeddings /= np.linalg.norm(text_embeddings, axis=-1, keepdims=True)
+    similarities = np.dot(text_embeddings, text_embeddings.T) # cosine sim
+    probs = np.exp(log_probs)
 
+    K_cos = similarities 
+    K_cos_prob = probs.reshape(N, 1) * similarities * probs.reshape(1, N)
+    K_cos_oneminusprob = (1-probs).reshape(N, 1) * similarities * (1-probs).reshape(1, N)
 
 
 out = {}
@@ -145,8 +168,9 @@ pct = [0.05, .1, .2, .5]
 for x in pct:
     M = int(x*N)
     for kernel_matrix_name, K in Ks.items():
-        print(f'running: {kernel_matrix_name}_M={M}')
+        s = time.time()
         inds = dpp(K, M)
+        print(f'running: {kernel_matrix_name}_M={M} cost {time.time()-s:.2f} seconds')
         out[f'{kernel_matrix_name}_M={M}'] = inds
 
 
