@@ -162,19 +162,43 @@ else:
     K_cos_oneminusprob = (1-probs).reshape(N, 1) * similarities * (1-probs).reshape(1, N)
 
 
-out = {}
+
+def cholesky_jitter(K, jitter=1e-5):
+    K[np.diag_indices_from(K)] += jitter
+    return K
+
+def cholesky_jitter_variable(K, jitters=[0, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]):
+    for v in jitters:
+        try:
+            Kt = cholesky_jitter(K, v)
+            np.linalg.cholesky(Kt)
+            print(v)
+            return Kt
+        except:
+            continue
+    
+    raise ValueError()
+
+
+print('add jitter ensures matrices are psd')
+# cholesky O(N^3) too costly
+# K_cos = cholesky_jitter_variable(K_cos)
+# K_cos_prob = cholesky_jitter_variable(K_cos_prob)
+# K_cos_oneminusprob = cholesky_jitter_variable(K_cos_oneminusprob)
+K_cos = cholesky_jitter(K_cos, 1e-1)
+K_cos_prob = cholesky_jitter(K_cos_prob, 1)
+K_cos_oneminusprob = cholesky_jitter(K_cos_oneminusprob, 1)
+print('add jitter ensures matrices are psd done!')
+
+
 Ks = {'K_cos': K_cos, 'K_cos_prob': K_cos_prob, 'K_cos_oneminusprob': K_cos_oneminusprob}
-pct = [0.05, .1, .2, .5]
-for x in pct:
-    M = int(x*N)
-    for kernel_matrix_name, K in Ks.items():
-        s = time.time()
-        inds = dpp(K, M)
-        print(f'running: {kernel_matrix_name}_M={M} cost {time.time()-s:.2f} seconds')
-        out[f'{kernel_matrix_name}_M={M}'] = inds
+for kernel_matrix_name, K in Ks.items():
+    out = {}
+    s = time.time()
+    inds = dpp(K, N) # select till triggers stopping criterion
+    print(f'running: {kernel_matrix_name} has len={len(inds)} cost {time.time()-s:.2f} seconds')
+    out['K'] = inds
 
-
-save_path = os.path.join(save_dir, 'note_explore_dpp_llama-7b_flan_v2_subsets.pkl')
-
-with open(save_path, 'wb') as f:
-    pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)
+    save_path = os.path.join(save_dir, 'note_explore_dpp_llama-7b_flan_v2_subsets_{kernel_matrix_name}.pkl')
+    with open(save_path, 'wb') as f:
+        pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)
