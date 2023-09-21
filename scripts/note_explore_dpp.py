@@ -9,6 +9,7 @@ import os
 import sys
 import numpy as np
 
+import pickle
 from tqdm import tqdm 
 
 import torch
@@ -22,11 +23,20 @@ from transformers import DataCollatorForSeq2Seq
 
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
 
+import sys
+sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
+from dpp import dpp
 
 model_name_or_path = '../results/baselines/huggyllama/llama-7b'
 
 train_file = '../data/processed/all.jsonl'
 train_file = '../data/processed/flan_v2/flan_v2_data.jsonl'
+
+
+save_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts'
+save_path = os.path.join(save_dir, 'note_explore_dpp_llama-7b_flan_v2_outputs.pkl')
+gen_embeddings = False
+
 
 
 data_files = {'train': train_file}
@@ -67,7 +77,7 @@ train_dataset = lm_datasets['train']
 train_dataset.set_format(type="torch", 
                          output_all_columns=False, 
                          columns=['input_ids', 'labels', 'attention_mask'])
-
+train_dataset
 
 
 
@@ -75,38 +85,72 @@ train_dataset.set_format(type="torch",
 
 loader = DataLoader(train_dataset, shuffle=False, batch_size=1) 
 
+if gen_embeddings:
+
+    device = 'cuda'
+
+    text_embeddings = []
+    log_probs = []
+
+    for batch in tqdm(loader, total=len(loader)):
+        batch = {k: v.to('cuda', non_blocking=True) for k, v in batch.items()}
+        input_ids = batch['input_ids']
+
+        with torch.inference_mode():
+            outputs = model(**batch, output_hidden_states=True)
+
+        # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
+        text_embedding = outputs['hidden_states'][-1].mean(1)
+
+        # sum of output token log probs
+        log_prob = -outputs['loss']
+
+        text_embeddings.append(text_embedding.detach().cpu().numpy())
+        log_probs.append(log_prob.detach().cpu().numpy())
+
+if gen_embeddings:
+    d = {'text_embeddings': np.vstack(text_embeddings),
+         'log_probs': np.vstack(log_probs)}
+
+    with open(save_path, 'wb') as f:
+        pickle.dump(d, f, protocol=pickle.HIGHEST_PROTOCOL)
+else:
+    with open(save_path, 'rb') as f:
+        d = pickle.load(f)
 
 
-device = 'cuda'
+N = 100000 
+print(f'N={N}')
 
-text_embeddings = []
-log_probs = []
+# some entries are nan.
+d['log_probs'] = np.nan_to_num(d['log_probs'], nan=np.nanmean(d['log_probs']))
 
-for batch in tqdm(loader, total=len(loader)):
-    batch = {k: v.to('cuda', non_blocking=True) for k, v in batch.items()}
-    input_ids = batch['input_ids']
-    
-    with torch.inference_mode():
-        outputs = model(**batch, output_hidden_states=True)
-    
-    # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
-    text_embedding = outputs['hidden_states'][-1].mean(1)
-    
-    # sum of output token log probs
-    log_prob = -outputs['loss']
-    
-    text_embeddings.append(text_embedding.detach().cpu().numpy())
-    log_probs.append(log_prob.detach().cpu().numpy())
-    
+text_embeddings = d['text_embeddings'][:N,:]
+log_probs = d['log_probs'][:N,:].squeeze()
 
 
-save_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts'
-save_path = os.path.join(save_dir, 'note_explore_dpp_llama-7b_flan_v2_outputs.pkl')
+text_embeddings /= np.linalg.norm(text_embeddings, axis=-1, keepdims=True)
+similarities = np.dot(text_embeddings, text_embeddings.T) # cosine sim
+probs = np.exp(log_probs)
 
-import pickle
+K_cos = similarities 
+K_cos_prob = probs.reshape(N, 1) * similarities * probs.reshape(1, N)
+K_cos_oneminusprob = (1-probs).reshape(N, 1) * similarities * (1-probs).reshape(1, N)
 
-d = {'text_embeddings': np.vstack(text_embeddings),
-     'log_probs': np.vstack(log_probs)}
+
+
+out = {}
+Ks = {'K_cos': K_cos, 'K_cos_prob': K_cos_prob, 'K_cos_oneminusprob': K_cos_oneminusprob}
+pct = [0.05, .1, .2, .5]
+for x in pct:
+    M = int(x*N)
+    for kernel_matrix_name, K in Ks.items():
+        print(f'running: {kernel_matrix_name}_M={M}')
+        inds = dpp(K, M)
+        out[f'{kernel_matrix_name}_M={M}'] = inds
+
+
+save_path = os.path.join(save_dir, 'note_explore_dpp_llama-7b_flan_v2_subsets.pkl')
 
 with open(save_path, 'wb') as f:
-    pickle.dump(d, f, protocol=pickle.HIGHEST_PROTOCOL)
+    pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)
