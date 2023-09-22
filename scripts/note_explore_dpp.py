@@ -191,7 +191,11 @@ K_cos_oneminusprob = cholesky_jitter(K_cos_oneminusprob, 1)
 print('add jitter ensures matrices are psd done!')
 
 
-Ks = {'K_cos': K_cos, 'K_cos_prob': K_cos_prob, 'K_cos_oneminusprob': K_cos_oneminusprob}
+Ks = {
+# 'K_cos': K_cos, 
+'K_cos_oneminusprob': K_cos_oneminusprob,
+'K_cos_prob': K_cos_prob, 
+}
 for kernel_matrix_name, K in Ks.items():
     out = {}
     s = time.time()
@@ -199,6 +203,6 @@ for kernel_matrix_name, K in Ks.items():
     print(f'running: {kernel_matrix_name} has len={len(inds)} cost {time.time()-s:.2f} seconds')
     out['K'] = inds
 
-    save_path = os.path.join(save_dir, 'note_explore_dpp_llama-7b_flan_v2_subsets_{kernel_matrix_name}.pkl')
+    save_path = os.path.join(save_dir, f'note_explore_dpp_llama-7b_flan_v2_subsets_{kernel_matrix_name}.pkl')
     with open(save_path, 'wb') as f:
         pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)

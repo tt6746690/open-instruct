@@ -14,6 +14,7 @@ os.environ['CURL_CA_BUNDLE'] = ''
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 ##
+import pickle
 from collections import Counter
 import logging
 import os
@@ -21,7 +22,7 @@ import sys
 import json
 import re
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import Optional, List
 from functools import partial
 
 import pyarrow
@@ -468,6 +469,9 @@ class DataTrainingArguments:
     subsample_mixture: Optional[str] = field(
         default=None,
     )
+    subsample_inds_file: Optional[str] = field(
+        default=None,
+    )
 
     def __post_init__(self):
         if self.dataset_name is None and self.train_file is None:
@@ -492,6 +496,12 @@ def main():
         data_args.subsample_mixture = json.loads(data_args.subsample_mixture)
         print('subsample mixture:')
         print(data_args.subsample_mixture)
+
+    if data_args.subsample_mixture is not None and data_args.subsample_inds_file is not None:
+        raise ValueError('Either use mixture proportion or exact subset indices, but not both.')
+    if data_args.subsample_inds_file is not None:
+        if 'flan_v2' not in data_args.train_file:
+            raise ValueError('subset indices only support flan_v2 for now.')
 
     # wpq: save args to a json file
     with training_args.main_process_first(local=False, desc=f"Saving args to `{training_args.output_dir+'.args.json'}`"):
@@ -744,6 +754,13 @@ def main():
                 replace = True # always sample with replacement, for fairer comparison.
                 inds += list(np.random.choice(N, size=n, replace=replace) + cum)
                 cum += N
+            train_dataset = train_dataset.select(inds)
+
+        if data_args.subsample_inds_file is not None:
+            with open(data_args.subsample_inds_file, 'rb') as f:
+                inds = pickle.load(f)['K']
+            logger.info(f'Using subsample_inds_file: {data_args.subsample_inds_file}')
+            logger.info(f'subsample_inds_file has {len(inds)} indices.')
             train_dataset = train_dataset.select(inds)
         ## 
         if data_args.max_train_samples is not None:
