@@ -187,7 +187,7 @@ print('add jitter ensures matrices are psd')
 # K_cos_oneminusprob = cholesky_jitter_variable(K_cos_oneminusprob)
 K_cos = cholesky_jitter(K_cos, 1e-1)
 K_cos_prob = cholesky_jitter(K_cos_prob, 1)
-K_cos_oneminusprob = cholesky_jitter(K_cos_oneminusprob, 1)
+K_cos_oneminusprob = cholesky_jitter(K_cos_oneminusprob, 1) # prob lower is better (surprisal good)
 print('add jitter ensures matrices are psd done!')
 
 
