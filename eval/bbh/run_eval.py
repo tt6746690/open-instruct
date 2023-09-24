@@ -4,11 +4,16 @@ import re
 import json
 import tqdm
 import glob
-import random
+import random 
 import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import evaluate
 import torch
-from eval.utils import load_hf_lm_and_tokenizer, generate_completions, query_openai_chat_model
+from eval.utils import (
+    load_hf_lm_and_tokenizer,
+    generate_completions,
+    query_openai_chat_model,
+    dynamic_import_function,
+)
 from transformers import GPT2LMHeadModel
 
 
@@ -23,13 +28,20 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None,
 
     ## wpq: for k=3 shots, reduce number of demonstrations if the prompt is too long.
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in examples:
         for n_shot in list(range(args.n_shot+1)[::-1]):
             task_prompt_concat = get_task_prompt(n_shot)
+            prompt = task_prompt_concat + "\n\nQ: " + example["input"]
             if args.use_chat_format:
-                prompt = "<|user|>\n" + task_prompt_concat + "\n\nQ: " + example["input"] + "\n<|assistant|>\nA:"
+                messages = [{"role": "user", "content": prompt}]
+                prompt = chat_formatting_function(messages, add_bos=False)
+                if prompt[-1] in ["\n", " "]:
+                    prompt += "A:"
+                else:
+                    prompt += " A:"
             else:
-                prompt = task_prompt_concat + "\n\nQ: " + example["input"] + "\nA:"
+                prompt += "\nA:"
             tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
             if tokenized_prompt_len <= max_input_seq_len:
                 break
@@ -66,15 +78,14 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None,
     for example, output in zip(examples, outputs):
         example["raw_output"] = output
         
-        # only keep the first part of the output - this is mainly for vanilla language models.
-        output = output.strip().split("\n\n")[0].strip()
-
         # extract the first answer after `So the answer is` and before the next period.
         # if there is no such answer, we will just use the raw output.
         results = re.search(r"So the answer is (.*?)\.", output)
         if results:
             prediction = results.group(1).strip()
         else:
+            # only keep the first part of the output - this is mainly for vanilla language models.
+            output = output.strip().split("\n\n")[0].strip()
             prediction = output.strip()
 
         example["prediction"] = prediction
@@ -170,6 +181,9 @@ def main(args):
                 new_prompt_fields = ['\n\n'.join(new_prompt_fields[:2])]+new_prompt_fields[2:]
             assert(len(new_prompt_fields) == 4)
             all_prompts[task_name] = new_prompt_fields
+
+    # ## previous impl. modified to enable using <=3 in-context examples when prompt is too long.
+    # 
     #     with open(cot_prompt_file, "r") as f:
     #         task_name = os.path.basename(cot_prompt_file).split(".")[0]
     #         task_prompt = "".join(f.readlines()[2:])
@@ -196,8 +210,9 @@ def main(args):
             model_name_or_path=args.model_name_or_path, 
             tokenizer_name_or_path=args.tokenizer_name_or_path, 
             load_in_8bit=args.load_in_8bit, 
+            device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
-            use_fast_tokenizer=True,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
         )
 
     # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
@@ -242,6 +257,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="results/bbh")
     parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
+    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.")
     parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
     parser.add_argument("--no_cot", action="store_true", help="if specified, chain of thoughts will be removed from the prompts.")
     parser.add_argument("--max_num_examples_per_task", type=int, default=None, help="maximum number of examples to evaluate per task.")
@@ -249,6 +265,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--n_shot", type=int, default=3)
 

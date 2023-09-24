@@ -99,7 +99,6 @@ def main(args):
     use_fast = 'mpt' in args.model_name_or_path
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         args.model_name_or_path,
-        padding_side="right",
         use_fast=use_fast,
     )
     new_content = split_all(content, args.begin, args.end, tokenizer, args.max_length)

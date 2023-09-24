@@ -3,10 +3,16 @@ import os
 import re
 import json
 import random
+import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
+import torch
 import evaluate
 from transformers import GPT2LMHeadModel
-
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
+from eval.utils import (
+    generate_completions,
+    load_hf_lm_and_tokenizer,
+    query_openai_chat_model,
+    dynamic_import_function,
+)
 from eval.gsm.examplars import EXAMPLARS as GSM_EXAMPLARS
 
 
@@ -40,8 +46,9 @@ def main(args):
             model_name_or_path=args.model_name_or_path, 
             tokenizer_name_or_path=args.tokenizer_name_or_path, 
             load_in_8bit=args.load_in_8bit, 
+            device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
-            use_fast_tokenizer=True,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         
     def get_prompt_prefix(n_shot):
@@ -73,14 +80,21 @@ def main(args):
         max_input_seq_len = 2048 - args.max_new_tokens
 
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in test_data:
         ## wpq: Use <n_shot prompt if exceeds `max_input_seq_len`.
         for n_shot in list(range(args.n_shot+1)[::-1]):
             prompt_prefix = get_prompt_prefix(n_shot)
+            prompt = prompt_prefix + "Question: " + example["question"].strip()
             if args.use_chat_format:
-                prompt = "<|user|>\n" + prompt_prefix + "Question: " + example["question"].strip() + "\n<|assistant|>\n" + "Answer:"
+                messages = [{"role": "user", "content": prompt}]
+                prompt = chat_formatting_function(messages, add_bos=False)
+                if prompt[-1] in ["\n", " "]:
+                    prompt += "Answer:"
+                else:
+                    prompt += " Answer:"
             else:
-                prompt = prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:"
+                prompt += "\nAnswer:"
             tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
             if tokenized_prompt_len < max_input_seq_len:
                 break
@@ -155,6 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="results/mgsm")
     parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
+    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.")
     parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
     parser.add_argument("--n_shot", type=int, default=8, help="max number of examples to use for demonstration.")
     parser.add_argument("--no_cot", action="store_true", help="If given, we're evaluating a model without chain-of-thought.")
@@ -162,6 +177,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
     parser.add_argument("--max_new_tokens", type=int, default=256)
 
     args = parser.parse_args()
