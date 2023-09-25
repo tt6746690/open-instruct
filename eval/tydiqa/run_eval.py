@@ -193,14 +193,20 @@ def main(args):
     print(f'frac test_data use less shots: {num_use_less_shots / len(test_data):.2f}')
 
     if args.model_name_or_path:
-        new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
+        # get the last token because the tokenizer may add space tokens at the start.
+        # wpq: t5 tokenizer strips `\n`. don't use `\n` as stop sequence. just generate to max length or encounters <\s>. 
+        new_line_token = tokenizer.encode("\n", add_special_tokens=False)
+        stop_id_sequences = [[new_line_token[-1]]] if new_line_token else None
+
+        generation_kwargs = {'max_new_tokens': args.max_new_tokens}
+
         test_predictions = generate_completions(
             model=model,
             tokenizer=tokenizer,
             prompts=prompts,
-            max_new_tokens=args.max_new_tokens,
             batch_size=args.eval_batch_size,
-            stop_id_sequences=[[new_line_token]]
+            stop_id_sequences=stop_id_sequences,
+            **generation_kwargs,
         )
         # remove unnecessary space
         test_predictions = [prediction.strip() for prediction in test_predictions]

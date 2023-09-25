@@ -205,13 +205,11 @@ def score_completions(model, tokenizer, scoring_examples, disable_tqdm=False):
 
 
 
-
-
 def load_hf_lm_and_tokenizer(
         model_name_or_path, 
         tokenizer_name_or_path=None, 
         device_map="auto",
-        torch_dtype="auto",
+        torch_dtype=torch.float16,
         load_in_8bit=False,
         convert_to_half=False,
         gptq_model=False,
