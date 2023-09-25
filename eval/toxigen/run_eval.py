@@ -4,10 +4,9 @@ import json
 import os
 import random
 from collections import defaultdict
-
 import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import torch
-import vllm
+
 from tqdm import tqdm, trange
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -15,11 +14,11 @@ from eval.utils import (
     generate_completions,
     load_hf_lm_and_tokenizer,
     query_openai_chat_model,
+    dynamic_import_function,
 )
-from eval.utils import dynamic_import_function 
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def score_generations(
     hate_classifier_tokenizer, hate_classifier_model, generations, batch_size=32
 ):
@@ -34,7 +33,7 @@ def score_generations(
     return classifications
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def eval_vllm_model(
     args,
     model,
@@ -45,6 +44,7 @@ def eval_vllm_model(
     tokenizer=None,
     save_path=None,
 ):
+    import vllm
     if save_path:
         fout = open(save_path, "w")
 
@@ -98,7 +98,7 @@ def eval_vllm_model(
     return performance
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def eval_hf_model(
     args,
     model,
@@ -112,23 +112,33 @@ def eval_hf_model(
     if save_path:
         fout = open(save_path, "w")
 
+
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in examples:
         if args.use_chat_format:
             messages = [{"role": "user", "content": "Complete the following: " + example["text"]}]
-            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, add_bos=False)
         else:
             prompt = example["text"]
         prompts.append(prompt)
 
-    new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1]
+    # get the last token because the tokenizer may add space tokens at the start.
+    # wpq: t5 tokenizer strips `\n`. don't use `\n` as stop sequence. just generate to max length or encounters <\s>. 
+    new_line_token = tokenizer.encode("\n", add_special_tokens=False)
+    stop_id_sequences = [[new_line_token[-1]]] if new_line_token else None
+
+    # wpq: modify `max_new_tokens=512` to `256` for faster generation.
+    generation_kwargs = {'max_new_tokens': args.max_new_tokens}
+
+
     outputs = generate_completions(
         model=model,
         tokenizer=tokenizer,
         prompts=prompts,
-        max_new_tokens=512,
-        batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-        stop_id_sequences=[[new_line_token]],
+        batch_size=args.eval_batch_size,
+        stop_id_sequences=stop_id_sequences,
+        **generation_kwargs,
     )
 
     classifications = score_generations(
@@ -248,6 +258,7 @@ def main(args):
                     }
                 )
 
+
     # we assume running on a gpu here.
     toxigenRobertaTokenizer = AutoTokenizer.from_pretrained("tomh/toxigen_roberta")
     toxigenRobertaModel = AutoModelForSequenceClassification.from_pretrained(
@@ -311,76 +322,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, default="data/eval/toxigen")
     parser.add_argument("--save_dir", type=str, default="results/toxigen")
-    parser.add_argument(
-        "--model_name_or_path",
-        type=str,
-        default=None,
-        help="if specified, we will load the model to generate the predictions.",
-    )
-    parser.add_argument(
-        "--tokenizer_name_or_path",
-        type=str,
-        default=None,
-        help="if specified, we will load the tokenizer from here.",
-    )
-    parser.add_argument(
-        "--use_slow_tokenizer",
-        action="store_true",
-        help="If given, we will use the slow tokenizer."
-    )
-    parser.add_argument(
-        "--openai_engine",
-        type=str,
-        default=None,
-        help="if specified, we will use the OpenAI API to generate the predictions.",
-    )
-    parser.add_argument(
-        "--eval_batch_size", type=int, default=1, help="batch size for evaluation."
-    )
-    parser.add_argument(
-        "--classifier_batch_size",
-        type=int,
-        default=32,
-        help="batch size to use for toxicity classifier.",
-    )
-    parser.add_argument(
-        "--classifier_device",
-        type=str,
-        default="cuda",
-        help="device to use for toxicity classifier.",
-    )
-    parser.add_argument(
-        "--load_in_8bit",
-        action="store_true",
-        help="load model in 8bit mode, which will reduce memory and speed up inference.",
-    )
-    parser.add_argument(
-        "--gptq",
-        action="store_true",
-        help="If given, we're evaluating a 4-bit quantized GPTQ model.",
-    )
-    parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
-        help="If given, we will use the chat format for the prompts."
-    )
-    parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
-    )
-    parser.add_argument(
-        "--use_vllm",
-        action="store_true",
-        help="If given, we will use vLLM to generate the predictions - much faster.",
-    )
-    parser.add_argument(
-        "--max_prompts_per_group",
-        type=int,
-        default=500,
-        help="If given, we will only use this many prompts per group. Default to 500 (half the available prompts).",
-    )
+    parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
+    parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
+    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.")
+    parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
+    parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
+    parser.add_argument("--classifier_batch_size", type=int, default=32, help="batch size to use for toxicity classifier.")
+    parser.add_argument("--classifier_device", type=str, default="cuda", help="device to use for toxicity classifier.")
+    parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
+    parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
+    parser.add_argument("--use_chat_format", action="store_true", help="If given, we will use the chat format for the prompts.")
+    parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
+    parser.add_argument("--use_vllm", action="store_true", help="If given, we will use vLLM to generate the predictions - much faster.")
+    parser.add_argument("--max_prompts_per_group", type=int, default=500, help="If given, we will only use this many prompts per group. Default to 500 (half the available prompts).")
+    parser.add_argument("--max_new_tokens", type=int, default=512)
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
