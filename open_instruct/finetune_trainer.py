@@ -745,6 +745,7 @@ def main():
         # e.g., ['cot', 'cot', 'flan_v2', 'flan_v2', ...]
         # note `counts.items()` is ordered as well!
         if data_args.subsample_mixture is not None:
+            logger.info('Subsample dataset according to mixture proportions: {data_args.subsample_mixture}')
             counts = Counter(train_dataset['dataset'])
             inds = []
             cum = 0
@@ -757,6 +758,7 @@ def main():
             train_dataset = train_dataset.select(inds)
 
         if data_args.subsample_inds_file is not None:
+            logger.info('Subsample dataset according to indices: {data_args.subsample_inds_file}')
             with open(data_args.subsample_inds_file, 'rb') as f:
                 inds = pickle.load(f)['K']
             logger.info(f'Using subsample_inds_file: {data_args.subsample_inds_file}')
