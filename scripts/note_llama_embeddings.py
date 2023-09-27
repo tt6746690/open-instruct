@@ -9,6 +9,7 @@ from tqdm import tqdm
 import pyarrow # import before `torch`, `transformers`, `datasets`
 import torch
 from torch.utils.data import DataLoader
+import torch.distributed as dist
 
 from datasets import load_dataset
 
@@ -17,62 +18,91 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
 
 
-test_run = False
-device = 'cuda'
-model_name_or_path = '../results/baselines/huggyllama/llama-7b'
 
-processed_dir = '../data/processed'
-
-save_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs'
-os.makedirs(save_dir, exist_ok=True)
-
-
-model = AutoModelForCausalLM.from_pretrained(
-    model_name_or_path,
-    device_map='auto',
-    torch_dtype=torch.float16)
-model.eval()
-
-tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
-tokenizer.padding_side = 'left'
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.pad_token_id = tokenizer.eos_token_id
+def datasets_shard_chunk_size(N, num_shards, index):
+    """Get chunk size for `datasets.shard(..., contiguous=True)`. """
+    div = N // num_shards
+    mod = N % num_shards
+    start = div * index + min(index, mod)
+    end = start + div + (1 if index < mod else 0)
+    return end-start
 
 
+def compute_lm_outputs(
+        dataset,
+        model_name_or_path='../results/baselines/huggyllama/llama-7b',
+        save_dir='/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs',
+        use_dist=False,
+        test_run=True,
+    ):
 
-for dataset in os.listdir(processed_dir):
-    dataset_path = os.path.join(processed_dir, dataset)
-    if dataset in ['tulu'] or not os.path.isdir(dataset_path):
-        continue
+    os.makedirs(save_dir, exist_ok=True)
+
+    if use_dist:
+        dist.init_process_group("gloo")
+        rank = dist.get_rank()
+        world_size = int(os.environ["LOCAL_WORLD_SIZE"])
+    else:
+        rank = 0
+        world_size = 2
+
+    device = f'cuda:{str(rank)}'
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name_or_path,
+        device_map=device,
+        torch_dtype=torch.float16)
+    model.eval()
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path, use_fast=True)
+    tokenizer.padding_side = 'left'
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    processed_dir = '../data/processed'
     train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
     assert(os.path.isfile(train_file))
-    
-    s = time.time()
-    
+
     data_files = {'train': train_file}
     raw_datasets = load_dataset("json", data_files=data_files)
     if test_run:
-        raw_datasets['train'] = raw_datasets['train'].select(range(100))
+        raw_datasets['train'] = raw_datasets['train'].select(range(10))
     print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
 
     encode_function = partial(
         encode_with_messages_format, tokenizer=tokenizer, max_seq_length=2048)
 
-    lm_datasets = raw_datasets.map(
-        encode_function, batched=False, num_proc=16,
-        desc="Tokenizing and reformatting instruction data")
+    if rank == 0:
+        lm_datasets = raw_datasets.map(
+            encode_function, batched=False, num_proc=16,
+            desc="Tokenizing and reformatting instruction data")
+    if use_dist:
+        dist.barrier()
+    if rank!= 0:
+        lm_datasets = raw_datasets.map(
+            encode_function, batched=False, num_proc=16,
+            desc="Tokenizing and reformatting instruction data")
 
     train_dataset = lm_datasets['train']
     train_dataset.set_format(
-        type="torch", output_all_columns=False, columns=['input_ids', 'labels', 'attention_mask'])
-    loader = DataLoader(train_dataset, shuffle=False, batch_size=1) 
+        type="torch",
+        output_all_columns=False,
+        columns=['input_ids', 'labels', 'attention_mask'])
+    train_dataset_chunk_sizes = [datasets_shard_chunk_size(len(train_dataset), num_shards=world_size, index=i) 
+                for i in range(world_size)]
+    train_dataset = train_dataset.shard(
+        num_shards=world_size, 
+        index=rank,
+        contiguous=True)
+    loader = DataLoader(train_dataset, shuffle=False, batch_size=1, pin_memory=True) 
 
 
     text_embeddings = []
     log_probs = []
-    for batch in tqdm(loader, total=len(loader)):
-        batch = {k: v.to('cuda', non_blocking=True) for k, v in batch.items()}
+    for batch in tqdm(loader, disable=rank!=0, total=len(loader)):
+        batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
         with torch.inference_mode():
             outputs = model(**batch, output_hidden_states=True)
 
@@ -81,18 +111,87 @@ for dataset in os.listdir(processed_dir):
         # sum of output token log probs
         log_prob = -outputs['loss']
 
-        text_embeddings.append(text_embedding.detach().cpu().numpy().astype(np.float32))
-        log_probs.append(log_prob.detach().cpu().numpy())
+        text_embeddings.append(text_embedding.detach().cpu())
+        log_probs.append(log_prob.detach().cpu())
 
+    text_embeddings = torch.vstack(text_embeddings).to(torch.float32)
+    log_probs = torch.vstack(log_probs)
 
-    output = {'text_embeddings': np.vstack(text_embeddings),
-              'log_probs': np.vstack(log_probs)}
+    print(f'rank={rank}: text_embeddings.shape = {text_embeddings.shape}, log_probs.shape = {log_probs.shape}, chunk_sizes = {train_dataset_chunk_sizes}')
+
+    if use_dist:
+        dist.barrier()
     
-    save_path = os.path.join(save_dir, f'{dataset}.pkl')
-    with open(save_path, 'wb') as f:
-        pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    e = time.time()
-    print(f"Finished computing embedding/logprob for {dataset} in {e-s:.2f} seconds")
+    def dist_gather_and_vstack_2d_tensors(tensor):
+        """ For ncll backend: requires roughly (world_size+1)/world_size x of 
+                stacked tensor's memory to fit in 1 gpu. 
+            For gloo backend, as long as everything fits in cpu memory.
+            """
+        D = tensor.shape[1]
+        max_chunk_size = max(train_dataset_chunk_sizes)
+        tensor_list = [torch.zeros((max_chunk_size, D), 
+                                   dtype=tensor.dtype, device=tensor.device) 
+                       for _ in range(len(train_dataset_chunk_sizes))]
+        # Note `tensor_list` have to be same shape, 
+        # pad `tensor` in all processes to same length before gather.
+        if tensor.shape[0] != max_chunk_size:
+            tensor = torch.vstack([
+                tensor,
+                torch.zeros((max_chunk_size-tensor.shape[0], D),
+                             device=tensor.device, dtype=tensor.dtype)
+            ])
+        if rank == 0:
+            dist.gather(tensor, gather_list=tensor_list, dst=0)
+        else:
+            dist.gather(tensor, gather_list=[], dst=0)
+        # remove padding 
+        tensor_list = [x[:B] for x, B in zip(tensor_list, train_dataset_chunk_sizes)]
+        tensor = torch.vstack(tensor_list)
+        return tensor
 
+    if use_dist:
+        text_embeddings = dist_gather_and_vstack_2d_tensors(text_embeddings)
+        log_probs = dist_gather_and_vstack_2d_tensors(log_probs)
+        
+
+    if rank == 0:
+        output = {'text_embeddings': text_embeddings,
+                  'log_probs': log_probs}
+        print('output: ', [(k, v.shape) for k, v in output.items()])
+        # if use_dist:
+        #     name = 'dist' + f'{dataset}.pkl'
+        # else:
+        #     name = f'{dataset}_rank={rank}.pkl'
+        save_path = os.path.join(save_dir, f'{dataset}.pkl')
+        with open(save_path, 'wb') as f:
+            pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+
+if __name__ == "__main__":
+
+    # `elastic` mode, does not need to supply `rank`, and `world_size`. 
+    """
+    python note_llama_embeddings.py
+
+    torchrun --nnodes=1 --nproc_per_node=4 --rdzv_id=100 --rdzv_backend=c10d --rdzv_endpoint=localhost:29400 \
+        note_llama_embeddings.py \
+        --dataset lima \
+        --model_name_or_path=../results/baselines/huggyllama/llama-7b \
+        --save_dir=/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs \
+    """
+
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", type=str, default="lima")
+    parser.add_argument("--model_name_or_path", type=str, default="../results/baselines/huggyllama/llama-7b")
+    parser.add_argument("--save_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs")
+    args = parser.parse_args()
     
+    compute_lm_outputs(
+        dataset=args.dataset,
+        model_name_or_path=args.model_name_or_path,
+        save_dir=args.save_dir,
+        use_dist=True,
+        test_run=False)
