@@ -156,13 +156,9 @@ def compute_lm_outputs(
         
 
     if rank == 0:
-        output = {'text_embeddings': text_embeddings,
-                  'log_probs': log_probs}
+        output = {'text_embeddings': text_embeddings.numpy(),
+                  'log_probs': log_probs.numpy()}
         print('output: ', [(k, v.shape) for k, v in output.items()])
-        # if use_dist:
-        #     name = 'dist' + f'{dataset}.pkl'
-        # else:
-        #     name = f'{dataset}_rank={rank}.pkl'
         save_path = os.path.join(save_dir, f'{dataset}.pkl')
         with open(save_path, 'wb') as f:
             pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
