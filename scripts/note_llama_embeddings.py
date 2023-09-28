@@ -28,6 +28,36 @@ def datasets_shard_chunk_size(N, num_shards, index):
     return end-start
 
 
+def dist_gather_and_vstack_2d_tensors(tensor, tensor_list_sizes, rank):
+    """ For ncll backend: requires roughly (world_size+1)/world_size x of 
+            stacked tensor's memory to fit in 1 gpu. 
+        For gloo backend, as long as everything fits in cpu memory.
+            however, timeout if send/recv hangs for 180000ms. transfering 
+            large data gives timeout error.
+        """
+    D = tensor.shape[1]
+    max_chunk_size = max(tensor_list_sizes)
+    tensor_list = [torch.zeros((max_chunk_size, D), 
+                                dtype=tensor.dtype, device=tensor.device) 
+                    for _ in range(len(tensor_list_sizes))]
+    # Note `tensor_list` have to be same shape, 
+    # pad `tensor` in all processes to same length before gather.
+    if tensor.shape[0] != max_chunk_size:
+        tensor = torch.vstack([
+            tensor,
+            torch.zeros((max_chunk_size-tensor.shape[0], D),
+                            device=tensor.device, dtype=tensor.dtype)
+        ])
+    if rank == 0:
+        dist.gather(tensor, gather_list=tensor_list, dst=0)
+    else:
+        dist.gather(tensor, gather_list=[], dst=0)
+    # remove padding 
+    tensor_list = [x[:B] for x, B in zip(tensor_list, tensor_list_sizes)]
+    tensor = torch.vstack(tensor_list)
+    return tensor
+
+
 def compute_lm_outputs(
         dataset,
         model_name_or_path='../results/baselines/huggyllama/llama-7b',
@@ -114,50 +144,42 @@ def compute_lm_outputs(
         text_embeddings.append(text_embedding.detach().cpu())
         log_probs.append(log_prob.detach().cpu())
 
-    text_embeddings = torch.vstack(text_embeddings).to(torch.float32)
-    log_probs = torch.vstack(log_probs)
+    text_embeddings = torch.vstack(text_embeddings).to(torch.float32).numpy()
+    log_probs = torch.vstack(log_probs).numpy()
 
     print(f'rank={rank}: text_embeddings.shape = {text_embeddings.shape}, log_probs.shape = {log_probs.shape}, chunk_sizes = {train_dataset_chunk_sizes}')
 
-    if use_dist:
-        dist.barrier()
-    
-
-    def dist_gather_and_vstack_2d_tensors(tensor):
-        """ For ncll backend: requires roughly (world_size+1)/world_size x of 
-                stacked tensor's memory to fit in 1 gpu. 
-            For gloo backend, as long as everything fits in cpu memory.
-            """
-        D = tensor.shape[1]
-        max_chunk_size = max(train_dataset_chunk_sizes)
-        tensor_list = [torch.zeros((max_chunk_size, D), 
-                                   dtype=tensor.dtype, device=tensor.device) 
-                       for _ in range(len(train_dataset_chunk_sizes))]
-        # Note `tensor_list` have to be same shape, 
-        # pad `tensor` in all processes to same length before gather.
-        if tensor.shape[0] != max_chunk_size:
-            tensor = torch.vstack([
-                tensor,
-                torch.zeros((max_chunk_size-tensor.shape[0], D),
-                             device=tensor.device, dtype=tensor.dtype)
-            ])
-        if rank == 0:
-            dist.gather(tensor, gather_list=tensor_list, dst=0)
-        else:
-            dist.gather(tensor, gather_list=[], dst=0)
-        # remove padding 
-        tensor_list = [x[:B] for x, B in zip(tensor_list, train_dataset_chunk_sizes)]
-        tensor = torch.vstack(tensor_list)
-        return tensor
+    # if use_dist:
+    #     text_embeddings = dist_gather_and_vstack_2d_tensors(
+    #         text_embeddings, train_dataset_chunk_sizes, rank)
+    #     log_probs = dist_gather_and_vstack_2d_tensors(
+    #         log_probs, train_dataset_chunk_sizes, rank)
 
     if use_dist:
-        text_embeddings = dist_gather_and_vstack_2d_tensors(text_embeddings)
-        log_probs = dist_gather_and_vstack_2d_tensors(log_probs)
-        
+        save_path = os.path.join(save_dir, f'{dataset}_rank={rank}.pkl')
+        with open(save_path, 'wb') as f:
+            output = {'text_embeddings': text_embeddings,
+                      'log_probs': log_probs}
+            pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    dist.barrier()
 
     if rank == 0:
-        output = {'text_embeddings': text_embeddings.numpy(),
-                  'log_probs': log_probs.numpy()}
+        if use_dist:
+            ## load and concat outputs from all ranks
+            text_embeddings = []
+            log_probs = []
+            for r in range(world_size):
+                save_path = os.path.join(save_dir, f'{dataset}_rank={r}.pkl')
+                with open(save_path, 'rb') as f:
+                    output = pickle.load(f)
+                text_embeddings.append(output['text_embeddings'])
+                log_probs.append(output['log_probs'])
+                os.remove(save_path)
+            text_embeddings = np.vstack(text_embeddings)
+            log_probs = np.vstack(log_probs)
+        output = {'text_embeddings': text_embeddings,
+                  'log_probs': log_probs}
         print('output: ', [(k, v.shape) for k, v in output.items()])
         save_path = os.path.join(save_dir, f'{dataset}.pkl')
         with open(save_path, 'wb') as f:
@@ -167,7 +189,6 @@ def compute_lm_outputs(
 
 if __name__ == "__main__":
 
-    # `elastic` mode, does not need to supply `rank`, and `world_size`. 
     """
     python note_llama_embeddings.py
 
