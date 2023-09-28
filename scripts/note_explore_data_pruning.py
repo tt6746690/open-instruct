@@ -77,6 +77,56 @@ def sort_dpp_map(X, logP, kernel_type='Kcos'):
     if len(inds) != N:
         raise ValueError(f'dpp map len(indices)={len(inds)} != {N} = N')
         
+    return inds 
+
+
+def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos'):
+    """O(N) memory instead of O(N^2) memory, due to lazily evalute kernel matrix."""
+    import sys
+    sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
+    from dpp import dpp_lazy
+
+    logP = torch.from_numpy(logP).to('cuda')
+    P = logP.exp()
+
+    N = P.shape[0]
+
+    X = torch.from_numpy(X).to('cuda')
+    X = torch.nn.functional.normalize(X, dim=-1)
+
+    jitter = 1e-3
+
+    def kernel_matrix_ith_row(i):
+        """Returns i-th row of kernel matrix `K`"""
+        if kernel_type == 'Kcos':
+            Ki = X[i]@X.T
+        elif kernel_type == 'Kcosp':
+            Ki = P[i]*X[i]@X.T*P.reshape(1,N)
+        elif kernel_type == 'Kcos1np':
+            Ki = (1-P[i])*X[i]@X.T*(1-P.reshape(1,N))
+        else:
+            raise ValueError(f'kernel_type={kernel_type} not supported')
+        Ki = Ki.squeeze()
+        Ki[i] += jitter
+        return Ki.to('cpu').numpy()
+
+    def kernel_matrix_diag():
+        if kernel_type == 'Kcos':
+            Kdiag = (X*X).sum(-1)
+        elif kernel_type == 'Kcosp':
+            Kdiag = (X*X).sum(-1) * (P*P)
+        elif kernel_type == 'Kcos1np':
+            Kdiag = (X*X).sum(-1) * ((1-P)*(1-P))
+        else:
+            raise ValueError(f'kernel_type={kernel_type} not supported')
+        Kdiag = Kdiag.squeeze()
+        Kdiag += jitter
+        return Kdiag.to('cpu').numpy()
+        
+    inds = dpp_lazy(N, kernel_matrix_ith_row, kernel_matrix_diag, N, jitter)
+    if len(inds) != N:
+        raise ValueError(f'dpp map len(indices)={len(inds)} != {N} = N')
+    
     return inds
 
 
@@ -103,7 +153,7 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None  
-        inds = sort_dpp_map(text_embeddings, log_probs, kernel_type=kernel_type)
+        inds = sort_dpp_map_memefficient(text_embeddings, log_probs, kernel_type=kernel_type)
     else:
         raise ValueError('sort_by={sort_by} not supported')
 
