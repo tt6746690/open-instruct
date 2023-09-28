@@ -5,6 +5,7 @@ import time
 
 import pickle
 from tqdm import tqdm 
+import datetime
 
 import pyarrow # import before `torch`, `transformers`, `datasets`
 import torch
@@ -16,6 +17,35 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
+
+
+def combine_lm_outputs_for_mixes():
+    save_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs'
+
+    mixes = {
+        'tulu_v1_human_mix': ['flan_v2', 'cot', 'dolly', 'oasst1'],
+        'tulu_v2_human_mix': ['flan_v2', 'cot', 'oasst1', 'lima'],
+    }
+
+    for mix_name, mix_datasets in mixes.items():
+
+        output_list = []
+        for dataset in mix_datasets:
+            save_path = os.path.join(save_dir, f'{dataset}.pkl')
+            with open(save_path, 'rb') as f:
+                output = pickle.load(f)
+            output_list.append(output)
+
+        output = {}
+        for k in ['text_embeddings', 'log_probs']:
+            output[k] = np.vstack([x[k] for x in output_list])
+
+        save_path = os.path.join(save_dir, f'{mix_name}.pkl')
+        with open(save_path, 'wb') as f:
+            pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        print(f'{mix_name}, {mix_datasets}')
+        print(f'Save {[(k, v.shape) for k, v in output.items()]} to {save_path}')
 
 
 
@@ -69,7 +99,7 @@ def compute_lm_outputs(
     os.makedirs(save_dir, exist_ok=True)
 
     if use_dist:
-        dist.init_process_group("gloo")
+        dist.init_process_group("gloo", timeout=datetime.timedelta(hours=6))
         rank = dist.get_rank()
         world_size = int(os.environ["LOCAL_WORLD_SIZE"])
     else:
