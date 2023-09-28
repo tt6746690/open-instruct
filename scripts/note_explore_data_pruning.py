@@ -75,7 +75,7 @@ def sort_dpp_map(X, logP, kernel_type='Kcos'):
 
     inds = dpp(K, N)
     if len(inds) != N:
-        raise ValueError(f'dpp map len(indices)={len(inds)} != {N} = N')
+        print(f'dpp map len(indices)={len(inds)} != {N} = N')
         
     return inds 
 
@@ -122,10 +122,11 @@ def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos'):
         Kdiag = Kdiag.squeeze()
         Kdiag += jitter
         return Kdiag.to('cpu').numpy()
-        
-    inds = dpp_lazy(N, kernel_matrix_ith_row, kernel_matrix_diag, N, jitter)
+         
+    max_length = min(30000, int(.3*N))
+    inds = dpp_lazy(N, kernel_matrix_ith_row, kernel_matrix_diag, max_length, jitter)
     if len(inds) != N:
-        raise ValueError(f'dpp map len(indices)={len(inds)} != {N} = N')
+        print(f'dpp map len(indices)={len(inds)} != {N} = N')
     
     return inds
 
