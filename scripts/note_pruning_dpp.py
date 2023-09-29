@@ -1,9 +1,3 @@
-from rosemary import jpt_parse_args, jpt_setup, jpt_in_notebook; jpt_setup()
-
-if jpt_in_notebook():
-    import os
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5'
-
 from functools import partial
 import os
 import sys
