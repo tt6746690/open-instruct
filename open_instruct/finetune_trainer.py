@@ -760,7 +760,7 @@ def main():
         if data_args.subsample_inds_file is not None:
             logger.info('Subsample dataset according to indices: {data_args.subsample_inds_file}')
             with open(data_args.subsample_inds_file, 'rb') as f:
-                inds = pickle.load(f)['K']
+                inds = pickle.load(f)['inds']
             logger.info(f'Using subsample_inds_file: {data_args.subsample_inds_file}')
             logger.info(f'subsample_inds_file has {len(inds)} indices.')
             train_dataset = train_dataset.select(inds)
