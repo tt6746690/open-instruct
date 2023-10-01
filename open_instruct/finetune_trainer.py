@@ -499,9 +499,9 @@ def main():
 
     if data_args.subsample_mixture is not None and data_args.subsample_inds_file is not None:
         raise ValueError('Either use mixture proportion or exact subset indices, but not both.')
-    if data_args.subsample_inds_file is not None:
-        if 'flan_v2' not in data_args.train_file:
-            raise ValueError('subset indices only support flan_v2 for now.')
+    # if data_args.subsample_inds_file is not None:
+    #     if 'flan_v2' not in data_args.train_file:
+    #         raise ValueError('subset indices only support flan_v2 for now.')
 
     # wpq: save args to a json file
     with training_args.main_process_first(local=False, desc=f"Saving args to `{training_args.output_dir+'.args.json'}`"):
