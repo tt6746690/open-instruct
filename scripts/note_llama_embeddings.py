@@ -19,34 +19,34 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
 
 
-def combine_lm_outputs_for_mixes():
-    save_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs'
-
+def combine_lm_outputs_for_mixes(dataset, save_dir):
+        
     mixes = {
         'tulu_v1_human_mix': ['flan_v2', 'cot', 'dolly', 'oasst1'],
         'tulu_v2_human_mix': ['flan_v2', 'cot', 'oasst1', 'lima'],
     }
 
-    for mix_name, mix_datasets in mixes.items():
+    mix_name = dataset
+    mix_datasets = mixes[dataset]
 
-        output_list = []
-        for dataset in mix_datasets:
-            save_path = os.path.join(save_dir, f'{dataset}.pkl')
-            with open(save_path, 'rb') as f:
-                output = pickle.load(f)
-            output_list.append(output)
+    output_list = []
+    for dataset in mix_datasets:
+        save_path = os.path.join(save_dir, f'{dataset}.pkl')
+        with open(save_path, 'rb') as f:
+            output = pickle.load(f)
+        output_list.append(output)
 
-        output = {}
-        for k in ['text_embeddings', 'log_probs']:
-            output[k] = np.vstack([x[k] for x in output_list])
+    output = {}
+    for k in ['text_embeddings', 'log_probs']:
+        output[k] = np.vstack([x[k] for x in output_list])
 
-        save_path = os.path.join(save_dir, f'{mix_name}.pkl')
-        with open(save_path, 'wb') as f:
-            pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+    save_path = os.path.join(save_dir, f'{mix_name}.pkl')
+    with open(save_path, 'wb') as f:
+        pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        print(f'{mix_name}, {mix_datasets}')
-        print(f'Save {[(k, v.shape) for k, v in output.items()]} to {save_path}')
 
+    print(f'dataset: {dataset}')
+    print(f'Save output={[(k, v.shape) for k, v in output.items()]} to {save_path}')
 
 
 def datasets_shard_chunk_size(N, num_shards, index):
@@ -97,6 +97,12 @@ def compute_lm_outputs(
     ):
 
     os.makedirs(save_dir, exist_ok=True)
+
+
+    if dataset in ['tulu_v1_human_mix', 'tulu_v2_human_mix']:
+        combine_lm_outputs_for_mixes(dataset, save_dir)
+        return
+
 
     if use_dist:
         dist.init_process_group("gloo", timeout=datetime.timedelta(hours=6))
@@ -210,11 +216,12 @@ def compute_lm_outputs(
             log_probs = np.vstack(log_probs)
         output = {'text_embeddings': text_embeddings,
                   'log_probs': log_probs}
-        print('output: ', [(k, v.shape) for k, v in output.items()])
         save_path = os.path.join(save_dir, f'{dataset}.pkl')
         with open(save_path, 'wb') as f:
             pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+        print(f'dataset: {dataset}')
+        print(f'Save output={[(k, v.shape) for k, v in output.items()]} to {save_path}')
 
 
 if __name__ == "__main__":
