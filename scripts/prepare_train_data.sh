@@ -90,6 +90,18 @@ wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/Open
 wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/OpenOrca/resolve/main/3_5M-GPT3_5-Augmented.parquet
 
 
+# ## flan v2 full dataset processing
+# 
+# # download full flan_v2 dataset with snap_download
+# python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='SirNeural/flan_v2', repo_type='dataset', local_dir='data/raw_train/flan2022', local_dir_use_symlinks=False)"
+#
+# # resample 1m/2m subset of flan_v2
+# python scripts/resample_flan_v2.py --flan_v2_data_dir data/raw_train/flan2022 --total_num_samples 1000000 --output_path data/raw_train/flan2022/flan2022_1m.jsonl
+#
+# # reformat flan2022 mixture data resampled 1m
+# python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset flan2022
+
+
 echo "Reformatting the datasets..."
 python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/
 

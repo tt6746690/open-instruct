@@ -135,42 +135,40 @@ def convert_flan_v2_data(data_dir, output_dir):
             }) + "\n")
 
 
-def convert_flan_v2_SirNeural_data(data_dir, output_dir):
+def convert_flan2022_data(data_dir, output_dir):
+    """Same as `flan_v2` reformatting. """
     from datasets import load_dataset
 
-    input_files = [x for x in os.listdir(data_dir) if x.endswith('jsonl.gz')]
+    def convert_data_fn(example, idx):
+        prompt = example['inputs']
+        if not prompt.endswith("\n") and not prompt.rstrip().endswith(":"):
+            prompt += "\n"
+        completion = example["targets"]
+        return {
+            'dataset': "flan2022", 
+            'id': f"flan2022_{idx}",
+            'messages': [
+                {'role': 'user', 'content': prompt},
+                {"role": "assistant", "content": completion},
+            ]}
 
+    input_files = [
+        'flan2022_1m.jsonl',
+    ]
     for input_file in input_files:
-        input_path = os.path.join(data_dir, input_file)
-        output_path = os.path.join(output_dir, input_file.split('_train.jsonl.gz')[0]+'_data.jsonl')
-        
+        output_path = os.path.join(output_dir, input_file.split('.jsonl')[0]+'_data.jsonl')
         if os.path.isfile(output_path):
             continue
 
-        ds = load_dataset('json', data_files={'train': input_path}, split='train')
-        # ds = ds.select(range(100))
-
-        def convert_data_fn(example, idx):
-            prompt = example['inputs']
-            if not prompt.endswith("\n") and not prompt.rstrip().endswith(":"):
-                prompt += "\n"
-            completion = example["targets"]
-            return {
-                'dataset': "flan_v2", 
-                'id': f"flan_v2_{idx}",
-                'messages': [
-                    {'role': 'user', 'content': prompt},
-                    {"role": "assistant", "content": completion},
-                ]}
+        input_path = os.path.join(data_dir, input_file)
+        ds = load_dataset('json', data_files={'train': input_path}, split='train', cache_dir=data_dir)
         ds = ds.map(convert_data_fn, 
                     remove_columns=["inputs", "targets", "task"], 
                     with_indices=True,
                     num_proc=30,
                     desc=f'Convert data for {input_file}',
                     keep_in_memory=True)
-
         ds.to_json(output_path)
-
 
 
 def convert_dolly_data(data_dir, output_dir):
