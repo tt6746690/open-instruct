@@ -2,7 +2,7 @@ import os
 import re
 import pickle
 import json
-
+import random
 import numpy as np
 import torch
 
@@ -145,7 +145,10 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
         text_embeddings = text_embeddings[:1000]
         log_probs = log_probs[:1000]
 
-    if sort_by.startswith('kmeansl2'):
+    if sort_by.startswith('random'):
+        inds = list(range(log_probs.shape[0]))
+        random.shuffle(inds)
+    elif sort_by.startswith('kmeansl2'):
         match = re.search(r'(?<=\=)\d+', sort_by)
         n_clusters = int(match.group()) if match else None
         S = sort_kmeans_l2_to_prototypes(text_embeddings, n_clusters)
@@ -158,8 +161,7 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     else:
         raise ValueError('sort_by={sort_by} not supported')
 
-        
-    if sort_by.startswith('dpp'):
+    if any(sort_by.startswith(x) for x in ['dpp', 'random']):
         save_to_pickle(
             save_path=os.path.join(save_dir, f'{sort_by}.pkl'),
             output={'inds': inds})

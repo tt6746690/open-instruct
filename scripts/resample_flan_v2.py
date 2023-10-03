@@ -3,12 +3,6 @@ import argparse
 import random
 import tqdm
 
-"""
-# resample 1m/2m subset of flan_v2
-python scripts/resample_flan_v2.py --flan_v2_data_dir data/raw_train/flan_v2_SirNeural --total_num_samples 1000000 --output_path data/raw_train/flan_v2_SirNeural/flan_v2_resampled_1m.jsonl
-python scripts/resample_flan_v2.py --flan_v2_data_dir data/raw_train/flan_v2_SirNeural --total_num_samples 2000000 --output_path data/raw_train/flan_v2_SirNeural/flan_v2_resampled_2m.jsonl
-"""
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -37,7 +31,6 @@ if __name__ == "__main__":
     #     "dialog_fsopt": 0.015,
     # }
 
-    # for SirNeural/flan_v2
     # for flan2022_submix:
     # ('flan2021_submix', 0.4),  # mixing weight = 40%
     #       ('flan_zsopt', 1),      # mixing weight = 25%
@@ -59,14 +52,15 @@ if __name__ == "__main__":
     #       ('dialog_zsopt', 1),    # mixing weight = 50%
     #       ('dialog_fsopt', 1),    # mixing weight = 50%
 
+    ## SirNeural/flan_v2
     portions = {
         'flan_zs_opt_train':   .4 * .25,
         'flan_fs_opt_train':   .4 * .25,
         'flan_zs_noopt_train': .4 * .25,
         'flan_fs_noopt_train': .4 * .25,
-        't0_zs_opt_train':     .32 * 1/3,
-        't0_zs_noopt_train':   .32 * 1/3,
-        't0_fs_no_opt_train':  .32 * 1/3,
+        't0_zs_opt_train':     .32 * .25,
+        't0_zs_noopt_train':   .32 * .25,
+        't0_fs_noopt_train':   .32 * .5, # missing fs_opt files, just sample from fs_noopt instead
         'niv2_zs_opt_train':   .2 * .5,
         'niv2_fs_opt_train':   .2 * .5,
         'cot_zs_opt_train':    .05 * .5,
@@ -75,7 +69,24 @@ if __name__ == "__main__":
         'dialog_fs_opt_train': .03 * .5,
     }
 
+    num_lines_dict = {
+        "flan_zs_opt_train": 62118170,
+        "flan_fs_opt_train": 123010706,
+        "flan_zs_noopt_train": 62118170,
+        "flan_fs_noopt_train": 61521286,
+        "t0_zs_opt_train": 42881000,
+        "t0_zs_noopt_train": 42881000,
+        "t0_fs_noopt_train": 42545443,
+        "niv2_zs_opt_train": 5031430,
+        "niv2_fs_opt_train": 10031790,
+        "cot_zs_opt_train": 74730,
+        "cot_fs_opt_train": 149490,
+        "dialog_zs_opt_train": 11274820,
+        "dialog_fs_opt_train": 22528240
+    }
+
     assert sum(portions.values()) == 1.0
+    assert all(os.path.isfile(os.path.join(args.flan_v2_data_dir, f'{x}.jsonl')) for x in portions.keys())
 
     num_samples = {k: int(v * args.total_num_samples) for k, v in portions.items()}
 
@@ -85,10 +96,14 @@ if __name__ == "__main__":
             task_data_path = os.path.join(args.flan_v2_data_dir, f"{task_name}.jsonl")
             # randomly sample num_sample lines from task_data_path, the data might be very large so we can't load it all into memory
             # we need to first count the total number of lines in the file and then only load the lines we need
-            num_lines = 0
-            with open(task_data_path, "r") as fin:
-                for line in tqdm.tqdm(fin, desc=f"Counting lines in {task_data_path}"):
-                    num_lines += 1
+            if task_name not in num_lines_dict:
+                num_lines = 0
+                with open(task_data_path, "r") as fin:
+                    for line in tqdm.tqdm(fin, desc=f"Counting lines in {task_data_path}"):
+                        num_lines += 1                    
+                num_lines_dict[task_name] = num_lines
+            else:
+                num_lines = num_lines_dict[task_name]
             print(f"Sampling {num_sample} lines from {num_lines} lines")
             sampled_lines = random.sample(range(num_lines), num_sample)
             sampled_lines = set(sampled_lines)
@@ -96,3 +111,5 @@ if __name__ == "__main__":
                 for i, line in tqdm.tqdm(enumerate(fin), desc=f"Reading the file to save the sampled lines"):
                     if i in sampled_lines:
                         fout.write(line)
+
+    print('Number of lines for jsonl file: ', num_lines_dict)
