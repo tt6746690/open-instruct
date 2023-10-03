@@ -3,6 +3,7 @@ import os
 import numpy as np
 import time
 
+import random
 import pickle
 from tqdm import tqdm 
 import datetime
@@ -19,7 +20,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
 
 
-def combine_lm_outputs_for_mixes(dataset, save_dir):
+def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
         
     mixes = {
         'tulu_v1_human_mix': ['flan_v2', 'cot', 'dolly', 'oasst1'],
@@ -40,7 +41,7 @@ def combine_lm_outputs_for_mixes(dataset, save_dir):
     for k in ['text_embeddings', 'log_probs']:
         output[k] = np.vstack([x[k] for x in output_list])
 
-    save_path = os.path.join(save_dir, f'{mix_name}.pkl')
+    save_path = os.path.join(save_dir, ('test_' if test_run else '')+f'{datasemix_name}.pkl')
     with open(save_path, 'wb') as f:
         pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -93,24 +94,33 @@ def compute_lm_outputs(
         model_name_or_path='../results/baselines/huggyllama/llama-7b',
         save_dir='/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs',
         use_dist=False,
-        test_run=True,
+        test_run=False,
+        shuffle=False,
     ):
+    """
+        `shuffle` to allow each process to process roughly similar workload cross the dataset 
+            to avoid unnecessary waiting.
+    """
 
     os.makedirs(save_dir, exist_ok=True)
 
     if dataset in ['tulu_v1_human_mix', 'tulu_v2_human_mix']:
-        combine_lm_outputs_for_mixes(dataset, save_dir)
+        combine_lm_outputs_for_mixes(dataset, save_dir, test_run)
         return
 
     if use_dist:
         dist.init_process_group("gloo", timeout=datetime.timedelta(hours=6))
-        rank = dist.get_rank()
-        world_size = int(os.environ["LOCAL_WORLD_SIZE"])
+        world_size = dist.get_world_size()
+        rank = dist.get_rank() # global rank
+        local_rank = int(os.environ["LOCAL_RANK"])
     else:
         rank = 0
+        local_rank = 0
         world_size = 1
 
-    device = f'cuda:{str(rank)}'
+    print(f'rank/local_rank/world_size: {rank}/{local_rank}/{world_size}\n')
+
+    device = f'cuda:{str(local_rank)}'
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
@@ -126,13 +136,16 @@ def compute_lm_outputs(
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     processed_dir = '../data/processed'
-    train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
+    if 'flan2022' in dataset:
+        train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
+    else:
+        train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
     assert(os.path.isfile(train_file))
 
     data_files = {'train': train_file}
     raw_datasets = load_dataset("json", data_files=data_files)
-    if test_run:
-        raw_datasets['train'] = raw_datasets['train'].select(range(10))
+    # if test_run:
+    #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
     print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
 
     encode_function = partial(
@@ -154,6 +167,14 @@ def compute_lm_outputs(
         type="torch",
         output_all_columns=False,
         columns=['input_ids', 'labels', 'attention_mask'])
+    if shuffle:
+        random.seed(0)
+        shuffle_inds = list(range(len(train_dataset)))
+        random.shuffle(shuffle_inds)
+        reverse_shuffle_inds = [(i, ind) for i, ind in enumerate(shuffle_inds)]
+        reverse_shuffle_inds = sorted(reverse_shuffle_inds, key=lambda x: x[1])
+        reverse_shuffle_inds = [x[0] for x in reverse_shuffle_inds]
+        train_dataset = train_dataset.select(shuffle_inds)
     train_dataset_chunk_sizes = [datasets_shard_chunk_size(len(train_dataset), num_shards=world_size, index=i) 
                 for i in range(world_size)]
     train_dataset = train_dataset.shard(
@@ -181,7 +202,7 @@ def compute_lm_outputs(
     text_embeddings = torch.vstack(text_embeddings).to(torch.float32).numpy()
     log_probs = torch.vstack(log_probs).numpy()
 
-    print(f'rank={rank}: text_embeddings.shape = {text_embeddings.shape}, log_probs.shape = {log_probs.shape}, chunk_sizes = {train_dataset_chunk_sizes}')
+    print(f'local_rank/global={local_rank}/{rank}: text_embeddings.shape = {text_embeddings.shape}, log_probs.shape = {log_probs.shape}, chunk_sizes = {train_dataset_chunk_sizes}')
 
     # if use_dist:
     #     text_embeddings = dist_gather_and_vstack_2d_tensors(
@@ -212,9 +233,12 @@ def compute_lm_outputs(
                 os.remove(save_path)
             text_embeddings = np.vstack(text_embeddings)
             log_probs = np.vstack(log_probs)
+
         output = {'text_embeddings': text_embeddings,
                   'log_probs': log_probs}
-        save_path = os.path.join(save_dir, f'{dataset}.pkl')
+        if shuffle:
+            output = {k: v[reverse_shuffle_inds] for k, v in output.items()}
+        save_path = os.path.join(save_dir, ('test_' if test_run else '')+f'{dataset}.pkl')
         with open(save_path, 'wb') as f:
             pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -239,11 +263,10 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="lima")
     parser.add_argument("--model_name_or_path", type=str, default="../results/baselines/huggyllama/llama-7b")
     parser.add_argument("--save_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs")
+    parser.add_argument("--use_dist", action='store_true', default=False)
+    parser.add_argument("--test_run", action='store_true', default=False)
+    parser.add_argument("--shuffle", action='store_true', default=False)
+
     args = parser.parse_args()
-    
-    compute_lm_outputs(
-        dataset=args.dataset,
-        model_name_or_path=args.model_name_or_path,
-        save_dir=args.save_dir,
-        use_dist=True,
-        test_run=False)
+
+    compute_lm_outputs(**vars(args))
