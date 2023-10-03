@@ -31,6 +31,32 @@ if __name__ == "__main__":
         "dialog_fsopt": 0.015,
     }
 
+    # for SirNeural/flan_v2
+    # for flan2022_submix:
+    # ('flan2021_submix', 0.4),  # mixing weight = 40%
+    #       ('flan_zsopt', 1),      # mixing weight = 25%
+    #       ('flan_fsopt', 1),      # mixing weight = 25%
+    #       ('flan_zsnoopt', 1),    # mixing weight = 25%
+    #       ('flan_fsnoopt', 1),    # mixing weight = 25%
+    # ('t0_submix', 0.32),       # mixing weight = 32%
+    #       ('t0_zsopt', 1),      # mixing weight = 25%
+    #       ('t0_fsopt', 1),      # mixing weight = 25%
+    #       ('t0_zsnoopt', 1),    # mixing weight = 25%
+    #       ('t0_fsnoopt', 1),    # mixing weight = 25%
+    # ('niv2_submix', 0.2),      # mixing weight = 20%
+    #       ('niv2_zsopt', 1),    # mixing weight = 50%
+    #       ('niv2_fsopt', 1),    # mixing weight = 50%
+    # ('cot_submix', 0.05),      # mixing weight = 5%
+    #       ('cot_zsopt', 1),    # mixing weight = 50%
+    #       ('cot_fsopt', 1),    # mixing weight = 50%
+    # ('dialog_submix', 0.03),   # mixing weight = 3%
+    #       ('dialog_zsopt', 1),    # mixing weight = 50%
+    #       ('dialog_fsopt', 1),    # mixing weight = 50%
+
+    # portions = {
+    #     'flan_zs_opt_train': 
+    # }
+
     assert sum(portions.values()) == 1.0
 
     num_samples = {k: int(v * args.total_num_samples) for k, v in portions.items()}
