@@ -20,6 +20,34 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
 
 
+
+def compute_el2n(logits, labels):
+    if logits.shape[0]!=1:
+        raise ValueError('compute_el2n supports bsz=1 only.')
+    # (Bsz, |Seq|, |Vocab|)
+    # Shift so that tokens < n predict n
+    shift_logits = logits[..., :-1, :].contiguous()
+    shift_labels = labels[..., 1:].contiguous()
+    # Flatten the tokens
+    # (Bsz*|Seq|, |Vocab|)
+    shift_logits = shift_logits.view(-1, model.config.vocab_size)
+    shift_probs = torch.nn.functional.softmax(shift_logits, dim=-1)
+    shift_labels = shift_labels.view(-1)
+    # only compute loss on the output tokens
+    output_tok_indices = (shift_labels != -100).nonzero().squeeze()
+    shift_labels = shift_labels[output_tok_indices]
+    shift_probs = shift_probs[output_tok_indices]
+    shift_logits = shift_logits[output_tok_indices]
+
+    # Enable model parallelism
+    shift_labels = shift_labels.to(shift_logits.device)
+    # Compute EL2N = || prob - one-hot-y ||_2
+    shift_probs[torch.arange(shift_probs.size(0)), shift_labels] -= 1
+    loss = torch.norm(shift_probs, dim=-1).mean()
+    return loss
+
+
+
 def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
         
     mixes = {
@@ -38,7 +66,7 @@ def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
         output_list.append(output)
 
     output = {}
-    for k in ['text_embeddings', 'log_probs']:
+    for k in ['text_embeddings', 'log_probs', 'el2ns']:
         output[k] = np.vstack([x[k] for x in output_list])
 
     save_path = os.path.join(save_dir, ('test_' if test_run else '')+f'{datasemix_name}.pkl')
@@ -58,6 +86,7 @@ def datasets_shard_chunk_size(N, num_shards, index):
     end = start + div + (1 if index < mod else 0)
     return end-start
 
+    
 
 def dist_gather_and_vstack_2d_tensors(tensor, tensor_list_sizes, rank):
     """ For ncll backend: requires roughly (world_size+1)/world_size x of 
@@ -141,26 +170,30 @@ def compute_lm_outputs(
     else:
         train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
     assert(os.path.isfile(train_file))
-
-    data_files = {'train': train_file}
-    raw_datasets = load_dataset("json", data_files=data_files)
-    # if test_run:
-    #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
-    print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
+    
 
     encode_function = partial(
         encode_with_messages_format, tokenizer=tokenizer, max_seq_length=2048)
 
     if rank == 0:
+        raw_datasets = load_dataset("json", data_files={'train': train_file})
+        # if test_run:
+        #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
+        print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
         lm_datasets = raw_datasets.map(
             encode_function, batched=False, num_proc=16,
             desc="Tokenizing and reformatting instruction data")
     if use_dist:
         dist.barrier()
     if rank!= 0:
+        raw_datasets = load_dataset("json", data_files={'train': train_file})
+        # if test_run:
+        #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
+        print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
         lm_datasets = raw_datasets.map(
             encode_function, batched=False, num_proc=16,
             desc="Tokenizing and reformatting instruction data")
+
 
     train_dataset = lm_datasets['train']
     train_dataset.set_format(
@@ -186,6 +219,7 @@ def compute_lm_outputs(
 
     text_embeddings = []
     log_probs = []
+    el2ns = []
     for batch in tqdm(loader, disable=rank!=0, total=len(loader)):
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
         with torch.inference_mode():
@@ -193,16 +227,20 @@ def compute_lm_outputs(
 
         # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
         text_embedding = outputs['hidden_states'][-1].mean(1)
-        # sum of output token log probs
+        # average of output token log probs
         log_prob = -outputs['loss']
+        # compute EL2N score
+        el2n = compute_el2n(outputs['logits'], batch['labels'])
 
         text_embeddings.append(text_embedding.detach().cpu())
         log_probs.append(log_prob.detach().cpu())
+        el2ns.append(el2n.detach().cpu())
 
     text_embeddings = torch.vstack(text_embeddings).to(torch.float32).numpy()
     log_probs = torch.vstack(log_probs).numpy()
+    el2ns = torch.vstack(el2ns).numpy()
 
-    print(f'local_rank/global={local_rank}/{rank}: text_embeddings.shape = {text_embeddings.shape}, log_probs.shape = {log_probs.shape}, chunk_sizes = {train_dataset_chunk_sizes}')
+    print(f'local_rank/global={local_rank}/{rank}: text_embeddings.shape = {text_embeddings.shape}, log_probs.shape = {log_probs.shape}, el2ns.shape = {el2ns.shape} chunk_sizes = {train_dataset_chunk_sizes}')
 
     # if use_dist:
     #     text_embeddings = dist_gather_and_vstack_2d_tensors(
@@ -214,7 +252,8 @@ def compute_lm_outputs(
         save_path = os.path.join(save_dir, f'{dataset}_rank={rank}.pkl')
         with open(save_path, 'wb') as f:
             output = {'text_embeddings': text_embeddings,
-                      'log_probs': log_probs}
+                      'log_probs': log_probs,
+                       'el2ns': el2ns}
             pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     dist.barrier()
@@ -224,18 +263,22 @@ def compute_lm_outputs(
             ## load and concat outputs from all ranks
             text_embeddings = []
             log_probs = []
+            el2ns = []
             for r in range(world_size):
                 save_path = os.path.join(save_dir, f'{dataset}_rank={r}.pkl')
                 with open(save_path, 'rb') as f:
                     output = pickle.load(f)
                 text_embeddings.append(output['text_embeddings'])
                 log_probs.append(output['log_probs'])
+                el2ns.append(output['el2ns'])
                 os.remove(save_path)
             text_embeddings = np.vstack(text_embeddings)
             log_probs = np.vstack(log_probs)
+            el2ns = np.vstack(el2ns)
 
         output = {'text_embeddings': text_embeddings,
-                  'log_probs': log_probs}
+                   'log_probs': log_probs,
+                   'el2ns': el2ns}
         if shuffle:
             output = {k: v[reverse_shuffle_inds] for k, v in output.items()}
         save_path = os.path.join(save_dir, ('test_' if test_run else '')+f'{dataset}.pkl')
