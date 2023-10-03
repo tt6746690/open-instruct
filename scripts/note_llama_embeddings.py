@@ -98,11 +98,9 @@ def compute_lm_outputs(
 
     os.makedirs(save_dir, exist_ok=True)
 
-
     if dataset in ['tulu_v1_human_mix', 'tulu_v2_human_mix']:
         combine_lm_outputs_for_mixes(dataset, save_dir)
         return
-
 
     if use_dist:
         dist.init_process_group("gloo", timeout=datetime.timedelta(hours=6))
@@ -110,7 +108,7 @@ def compute_lm_outputs(
         world_size = int(os.environ["LOCAL_WORLD_SIZE"])
     else:
         rank = 0
-        world_size = 2
+        world_size = 1
 
     device = f'cuda:{str(rank)}'
 

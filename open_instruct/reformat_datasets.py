@@ -23,7 +23,7 @@ import re
 import os
 import pandas as pd
 import argparse
-from instruction_encode_templates import encode_instruction_example, encode_few_shot_example
+from open_instruct.instruction_encode_templates import encode_instruction_example, encode_few_shot_example
 
 
 def convert_super_ni_data(data_dir, output_dir, zero_shot_examples_per_task=60, few_shot_examples_per_task=20, n_few_shot=2):
@@ -133,6 +133,44 @@ def convert_flan_v2_data(data_dir, output_dir):
                     {"role": "assistant", "content": completion},
                 ]
             }) + "\n")
+
+
+def convert_flan_v2_SirNeural_data(data_dir, output_dir):
+    from datasets import load_dataset
+
+    input_files = [x for x in os.listdir(data_dir) if x.endswith('jsonl.gz')]
+
+    for input_file in input_files:
+        input_path = os.path.join(data_dir, input_file)
+        output_path = os.path.join(output_dir, input_file.split('_train.jsonl.gz')[0]+'_data.jsonl')
+        
+        if os.path.isfile(output_path):
+            continue
+
+        ds = load_dataset('json', data_files={'train': input_path}, split='train')
+        # ds = ds.select(range(100))
+
+        def convert_data_fn(example, idx):
+            prompt = example['inputs']
+            if not prompt.endswith("\n") and not prompt.rstrip().endswith(":"):
+                prompt += "\n"
+            completion = example["targets"]
+            return {
+                'dataset': "flan_v2", 
+                'id': f"flan_v2_{idx}",
+                'messages': [
+                    {'role': 'user', 'content': prompt},
+                    {"role": "assistant", "content": completion},
+                ]}
+        ds = ds.map(convert_data_fn, 
+                    remove_columns=["inputs", "targets", "task"], 
+                    with_indices=True,
+                    num_proc=30,
+                    desc=f'Convert data for {input_file}',
+                    keep_in_memory=True)
+
+        ds.to_json(output_path)
+
 
 
 def convert_dolly_data(data_dir, output_dir):
@@ -518,18 +556,29 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=100000, num_g
             }) + "\n")    
         
 
+def get_all_supported_datasets():   
+    supported_datasets = []
+    all_funcs = [func_name for func_name in globals() if callable(globals()[func_name])]
+    for func_name in all_funcs:
+        if re.match(r"convert_.+_data", func_name):
+            supported_datasets.append(func_name[8:-5])
+    return supported_datasets
+
+
+
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--raw_data_dir", type=str, default="data/downloads")
     arg_parser.add_argument("--output_dir", type=str, default="data/processed")
     arg_parser.add_argument("--seed", type=int, default=42)
+    arg_parser.add_argument("--dataset", type=str, default="all", help="all or a specific dataset")
     args = arg_parser.parse_args()
     random.seed(args.seed)
 
     # get the subfolder names in raw_data_dir
     subfolders = [f for f in os.listdir(args.raw_data_dir) if os.path.isdir(os.path.join(args.raw_data_dir, f))]
 
-    # all supported datasets    
+    # all supported datasets
     supported_datasets = []
     all_funcs = [func_name for func_name in globals() if callable(globals()[func_name])]
     for func_name in all_funcs:
@@ -543,6 +592,9 @@ if __name__ == "__main__":
             print(f"Warning: {subfolder} in the raw data folder is not a supported dataset. We will skip it.")
         else:
             valid_subfolders.append(subfolder)
+
+    if args.dataset is not None and args.dataset != "all" and args.dataset in valid_subfolders:
+        valid_subfolders = [args.dataset]
     
     # prepare data for each dataset
     statistics = {}
