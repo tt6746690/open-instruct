@@ -136,30 +136,30 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     save_path = os.path.join(lm_output_dir, f'{dataset}.pkl')
     with open(save_path, 'rb') as f:
         d = pickle.load(f)
-    # some entries are nan, impute with mean value.
-    d['log_probs'] = np.nan_to_num(d['log_probs'], nan=np.nanmean(d['log_probs']))
-    text_embeddings = d['text_embeddings']
-    log_probs = d['log_probs'].squeeze()
-
     if test_run:
-        text_embeddings = text_embeddings[:1000]
-        log_probs = log_probs[:1000]
+        d = {k: v[:1000] for k, v in d.items()}
+        
+    # some entries are nan, impute with mean value.
+    text_embeddings = d['text_embeddings']
+    log_probs = np.nan_to_num(d['log_probs'], nan=np.nanmean(d['log_probs'])).squeeze()
+    el2ns = np.nan_to_num(d['el2ns'], nan=np.nanmean(d['el2ns'])).squeeze()
 
     if sort_by.startswith('random'):
+        random.seed(0)
         inds = list(range(log_probs.shape[0]))
         random.shuffle(inds)
-    elif sort_by.startswith('kmeansl2'):
+    elif sort_by == 'prob':
+        S = log_probs
+    elif sort_by == 'el2n':
+        S = el2ns
+    if sort_by.startswith('kmeansl2'):
         match = re.search(r'(?<=\=)\d+', sort_by)
         n_clusters = int(match.group()) if match else None
         S = sort_kmeans_l2_to_prototypes(text_embeddings, n_clusters)
-    elif sort_by == 'prob':
-        S = log_probs
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None  
-        inds = sort_dpp_map_memefficient(text_embeddings, log_probs, kernel_type=kernel_type)
-    else:
-        raise ValueError('sort_by={sort_by} not supported')
+        inds = sort_dpp_map(text_embeddings, log_probs, kernel_type=kernel_type)
 
     if any(sort_by.startswith(x) for x in ['dpp', 'random']):
         save_to_pickle(
@@ -168,6 +168,7 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     else:
         save_sorted_inds(save_dir, S, sort_by, reverse=False)
         save_sorted_inds(save_dir, S, sort_by, reverse=True)
+
 
 
 if __name__ == '__main__':

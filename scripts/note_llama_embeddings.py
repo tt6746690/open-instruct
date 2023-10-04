@@ -22,26 +22,34 @@ from open_instruct.finetune_trainer import encode_with_prompt_completion_format,
 
 
 def compute_el2n(logits, labels):
+    """ Computes Error l2 Norm score for pruning.
+        logits (Bsz, |Seq|, |Vocab|)
+        labels (Bsz, |Seq|)
+    """
     if logits.shape[0]!=1:
         raise ValueError('compute_el2n supports bsz=1 only.')
-    # (Bsz, |Seq|, |Vocab|)
+    vocab_size = logits.shape[-1]
+    device = logits.device
     # Shift so that tokens < n predict n
     shift_logits = logits[..., :-1, :].contiguous()
     shift_labels = labels[..., 1:].contiguous()
     # Flatten the tokens
     # (Bsz*|Seq|, |Vocab|)
-    shift_logits = shift_logits.view(-1, model.config.vocab_size)
+    shift_logits = shift_logits.view(-1, vocab_size)
     shift_probs = torch.nn.functional.softmax(shift_logits, dim=-1)
     shift_labels = shift_labels.view(-1)
     # only compute loss on the output tokens
-    output_tok_indices = (shift_labels != -100).nonzero().squeeze()
+    output_tok_indices = (shift_labels != -100).nonzero().reshape(-1)
+    # if no output tokens return nan
+    if output_tok_indices.size()[0] == 0:
+        return torch.tensor(np.nan, device=device)
     shift_labels = shift_labels[output_tok_indices]
     shift_probs = shift_probs[output_tok_indices]
     shift_logits = shift_logits[output_tok_indices]
 
     # Enable model parallelism
-    shift_labels = shift_labels.to(shift_logits.device)
-    # Compute EL2N = || prob - one-hot-y ||_2
+    shift_labels = shift_labels.to(device)
+    # Compute EL2N = || prob - one-hot-label ||_2
     shift_probs[torch.arange(shift_probs.size(0)), shift_labels] -= 1
     loss = torch.norm(shift_probs, dim=-1).mean()
     return loss
@@ -69,10 +77,9 @@ def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
     for k in ['text_embeddings', 'log_probs', 'el2ns']:
         output[k] = np.vstack([x[k] for x in output_list])
 
-    save_path = os.path.join(save_dir, ('test_' if test_run else '')+f'{datasemix_name}.pkl')
+    save_path = os.path.join(save_dir, ('test_' if test_run else '')+f'{mix_name}.pkl')
     with open(save_path, 'wb') as f:
         pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
-
 
     print(f'dataset: {dataset}')
     print(f'Save output={[(k, v.shape) for k, v in output.items()]} to {save_path}')
@@ -94,6 +101,11 @@ def dist_gather_and_vstack_2d_tensors(tensor, tensor_list_sizes, rank):
         For gloo backend, as long as everything fits in cpu memory.
             however, timeout if send/recv hangs for 180000ms. transfering 
             large data gives timeout error.
+
+            ```
+            text_embeddings = dist_gather_and_vstack_2d_tensors(
+                text_embeddings, train_dataset_chunk_sizes, rank)
+            ```
         """
     D = tensor.shape[1]
     max_chunk_size = max(tensor_list_sizes)
@@ -242,11 +254,6 @@ def compute_lm_outputs(
 
     print(f'local_rank/global={local_rank}/{rank}: text_embeddings.shape = {text_embeddings.shape}, log_probs.shape = {log_probs.shape}, el2ns.shape = {el2ns.shape} chunk_sizes = {train_dataset_chunk_sizes}')
 
-    # if use_dist:
-    #     text_embeddings = dist_gather_and_vstack_2d_tensors(
-    #         text_embeddings, train_dataset_chunk_sizes, rank)
-    #     log_probs = dist_gather_and_vstack_2d_tensors(
-    #         log_probs, train_dataset_chunk_sizes, rank)
 
     if use_dist:
         save_path = os.path.join(save_dir, f'{dataset}_rank={rank}.pkl')
@@ -256,7 +263,8 @@ def compute_lm_outputs(
                        'el2ns': el2ns}
             pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    dist.barrier()
+    if use_dist:
+        dist.barrier()
 
     if rank == 0:
         if use_dist:
