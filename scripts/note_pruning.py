@@ -23,16 +23,47 @@ def save_sorted_inds(save_dir, S, sort_by, reverse=False):
     save_to_pickle(save_path, output)
 
     
-def sort_kmeans_l2_to_prototypes(X, n_clusters):
-    from sklearn.cluster import KMeans
-    
-    kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init='auto', verbose=True)
-    kmeans.fit(X)
+def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='auto', dist_fn='l2'):
+    """
+        dist_fn
+            l2: euclidean distance
+            cd: cosine distance
+    """
+    from sklearn.cluster import KMeans, MiniBatchKMeans
 
+    if dist_fn not in ['l2', 'cd']:
+        raise ValueError(f'Invalid dist_fn={dist_fn}')
+
+    if kmeans_type == 'auto':
+        kmeans_type = 'kmeans' if len(X) <= 100000 else 'minibatch_kmeans'
+    if kmeans_type == 'minibatch_kmeans':
+        kmeans_cls = MiniBatchKMeans
+        kmeans_fn_kwargs = {'batch_size': 256}
+    elif kmeans_type == 'kmeans':
+        kmeans_cls = KMeans
+        kmeans_fn_kwargs = {}
+    else:
+        raise ValueError(f'Invalid kmeans_type={kmeans_type}')
+    
+    kmeans = kmeans_cls(
+        n_clusters=n_clusters, 
+        init='k-means++',
+        random_state=0,
+        n_init=10,
+        verbose=True,
+        **kmeans_fn_kwargs)
+
+    if dist_fn == 'cd':
+        X = X / np.linalg.norm(X, axis=1, ord=2)[:, np.newaxis]
+    kmeans.fit(X)
     cluster_labels = kmeans.labels_
     cluster_centers = kmeans.cluster_centers_
     P = cluster_centers[cluster_labels]
-    D = np.linalg.norm(X - P, axis=1)
+    if dist_fn == 'cd':
+        P = P / np.linalg.norm(P, axis=1, ord=2)[:, np.newaxis]
+        D = np.sum(X*P, axis=1)
+    else:
+        D = np.linalg.norm(X - P, axis=1)
     
     return D
 
@@ -152,10 +183,11 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
         S = log_probs
     elif sort_by == 'el2n':
         S = el2ns
-    if sort_by.startswith('kmeansl2'):
+    if sort_by.startswith('kmeans'):
+        dist_fn = 'l2' if sort_by.startswith('kmeansl2') else 'cd'
         match = re.search(r'(?<=\=)\d+', sort_by)
         n_clusters = int(match.group()) if match else None
-        S = sort_kmeans_l2_to_prototypes(text_embeddings, n_clusters)
+        S = sort_kmeans_dist_to_cluster_centers(text_embeddings, n_clusters, dist_fn=dist_fn)
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None  
