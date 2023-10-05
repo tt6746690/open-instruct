@@ -3,6 +3,7 @@ import re
 import pickle
 import json
 import random
+import time
 import numpy as np
 import torch
 
@@ -23,7 +24,7 @@ def save_sorted_inds(save_dir, S, sort_by, reverse=False):
     save_to_pickle(save_path, output)
 
     
-def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='auto', dist_fn='l2'):
+def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_kmeans', dist_fn='l2'):
     """
         dist_fn
             l2: euclidean distance
@@ -45,6 +46,8 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='auto', dist_
     else:
         raise ValueError(f'Invalid kmeans_type={kmeans_type}')
     
+    print(f'Running {kmeans_cls} to compute {"euclidean" if dist_fn == "l2" else "cosine"} distance to cluster centers.')
+    
     kmeans = kmeans_cls(
         n_clusters=n_clusters, 
         init='k-means++',
@@ -56,9 +59,7 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='auto', dist_
     if dist_fn == 'cd':
         X = X / np.linalg.norm(X, axis=1, ord=2)[:, np.newaxis]
     kmeans.fit(X)
-    cluster_labels = kmeans.labels_
-    cluster_centers = kmeans.cluster_centers_
-    P = cluster_centers[cluster_labels]
+    P = kmeans.cluster_centers_[kmeans.labels_]
     if dist_fn == 'cd':
         P = P / np.linalg.norm(P, axis=1, ord=2)[:, np.newaxis]
         D = np.sum(X*P, axis=1)
@@ -175,6 +176,7 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     log_probs = np.nan_to_num(d['log_probs'], nan=np.nanmean(d['log_probs'])).squeeze()
     el2ns = np.nan_to_num(d['el2ns'], nan=np.nanmean(d['el2ns'])).squeeze()
 
+    t0 = time.time()
     if sort_by.startswith('random'):
         random.seed(0)
         inds = list(range(log_probs.shape[0]))
@@ -192,6 +194,8 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None  
         inds = sort_dpp_map(text_embeddings, log_probs, kernel_type=kernel_type)
+    t1 = time.time()
+    print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
 
     if any(sort_by.startswith(x) for x in ['dpp', 'random']):
         save_to_pickle(
