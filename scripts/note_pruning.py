@@ -48,6 +48,7 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
     
     print(f'Running {kmeans_cls} to compute {"euclidean" if dist_fn == "l2" else "cosine"} distance to cluster centers.')
     
+    X = X.astype(np.float64)
     kmeans = kmeans_cls(
         n_clusters=n_clusters, 
         init='k-means++',
