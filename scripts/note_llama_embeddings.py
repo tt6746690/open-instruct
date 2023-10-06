@@ -1,3 +1,4 @@
+from collections import defaultdict
 from functools import partial
 import os
 import numpy as np
@@ -21,7 +22,7 @@ from open_instruct.finetune_trainer import encode_with_prompt_completion_format,
 
 
 
-def compute_el2n(logits, labels):
+def compute_losses(logits, labels):
     """ Computes Error l2 Norm score for pruning.
         logits (Bsz, |Seq|, |Vocab|)
         labels (Bsz, |Seq|)
@@ -46,14 +47,24 @@ def compute_el2n(logits, labels):
     shift_labels = shift_labels[output_tok_indices]
     shift_probs = shift_probs[output_tok_indices]
     shift_logits = shift_logits[output_tok_indices]
-
     # Enable model parallelism
     shift_labels = shift_labels.to(device)
-    # Compute EL2N = || prob - one-hot-label ||_2
-    shift_probs[torch.arange(shift_probs.size(0)), shift_labels] -= 1
-    loss = torch.norm(shift_probs, dim=-1).mean()
-    return loss
 
+    losses = {}
+    # Compute EL2N = || prob - one-hot-label ||_2
+    shift_probs_minus_onehot_target = shift_probs.clone()
+    shift_probs_minus_onehot_target[torch.arange(shift_probs.size(0)), shift_labels] -= 1
+    loss_tokenwise = torch.linalg.norm(shift_probs_minus_onehot_target, dim=-1, ord=2)
+    losses['el2n_agg=mean'] = loss_tokenwise.mean()
+    losses['el2n_agg=l2n'] =  torch.linalg.norm(loss_tokenwise, ord=2)
+    # Classification logit margin
+    shift_logits_true = torch.gather(shift_logits, 1, shift_labels.view(-1, 1)).squeeze()
+    shift_logits_other = shift_logits.clone()
+    shift_logits_other[torch.arange(shift_logits.size(0)), shift_labels] = float('-inf')
+    shift_logits_other_max, _ = torch.max(shift_logits_other, 1)
+    losses['logit_margin'] = (shift_logits_true-shift_logits_other_max).mean()
+
+    return losses
 
 
 def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
@@ -74,7 +85,7 @@ def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
         output_list.append(output)
 
     output = {}
-    for k in ['text_embeddings', 'log_probs', 'el2ns']:
+    for k in output_list[0].keys():
         output[k] = np.vstack([x[k] for x in output_list])
 
     save_path = os.path.join(save_dir, ('test_' if test_run else '')+f'{mix_name}.pkl')
@@ -228,10 +239,7 @@ def compute_lm_outputs(
         contiguous=True)
     loader = DataLoader(train_dataset, shuffle=False, batch_size=1, pin_memory=True) 
 
-
-    text_embeddings = []
-    log_probs = []
-    el2ns = []
+    output = defaultdict(list)
     for batch in tqdm(loader, disable=rank!=0, total=len(loader)):
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
         with torch.inference_mode():
@@ -242,25 +250,22 @@ def compute_lm_outputs(
         # average of output token log probs
         log_prob = -outputs['loss']
         # compute EL2N score
-        el2n = compute_el2n(outputs['logits'], batch['labels'])
+        losses = compute_losses(outputs['logits'], batch['labels'])
 
-        text_embeddings.append(text_embedding.detach().cpu())
-        log_probs.append(log_prob.detach().cpu())
-        el2ns.append(el2n.detach().cpu())
+        output['text_embedding'].append(text_embedding.detach().cpu().to(torch.float32))
+        output['log_prob'].append(log_prob.detach().cpu())
+        for k in ['el2n_agg=mean', 'el2n_agg=l2n', 'logit_margin']:
+            output[k].append(losses[k].detach().cpu())
 
-    text_embeddings = torch.vstack(text_embeddings).to(torch.float32).numpy()
-    log_probs = torch.vstack(log_probs).numpy()
-    el2ns = torch.vstack(el2ns).numpy()
+    for k, v in output.items():
+        output[k] = torch.vstack(v).to(torch.float32).numpy()
 
-    print(f'local_rank/global={local_rank}/{rank}: text_embeddings.shape = {text_embeddings.shape}, log_probs.shape = {log_probs.shape}, el2ns.shape = {el2ns.shape} chunk_sizes = {train_dataset_chunk_sizes}')
-
+    print(f'[local_rank/global={local_rank}/{rank}] '
+          f'output={[(k, v.shape) for k, v in output.items()]}')
 
     if use_dist:
         save_path = os.path.join(save_dir, f'{dataset}_rank={rank}.pkl')
         with open(save_path, 'wb') as f:
-            output = {'text_embeddings': text_embeddings,
-                      'log_probs': log_probs,
-                       'el2ns': el2ns}
             pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     if use_dist:
@@ -269,24 +274,16 @@ def compute_lm_outputs(
     if rank == 0:
         if use_dist:
             ## load and concat outputs from all ranks
-            text_embeddings = []
-            log_probs = []
-            el2ns = []
+            output = defaultdict(list)
             for r in range(world_size):
                 save_path = os.path.join(save_dir, f'{dataset}_rank={r}.pkl')
                 with open(save_path, 'rb') as f:
-                    output = pickle.load(f)
-                text_embeddings.append(output['text_embeddings'])
-                log_probs.append(output['log_probs'])
-                el2ns.append(output['el2ns'])
+                    output_per_ranks = pickle.load(f)
+                for k, v in output_per_ranks.items():
+                    output[k].append(v)
                 os.remove(save_path)
-            text_embeddings = np.vstack(text_embeddings)
-            log_probs = np.vstack(log_probs)
-            el2ns = np.vstack(el2ns)
-
-        output = {'text_embeddings': text_embeddings,
-                   'log_probs': log_probs,
-                   'el2ns': el2ns}
+            for k, v in output.items():
+                output[k] = np.vstack(v)
         if shuffle:
             output = {k: v[reverse_shuffle_inds] for k, v in output.items()}
         save_path = os.path.join(save_dir, ('test_' if test_run else '')+f'{dataset}.pkl')
@@ -300,13 +297,18 @@ def compute_lm_outputs(
 if __name__ == "__main__":
 
     """
-    python note_llama_embeddings.py
-
-    torchrun --nnodes=1 --nproc_per_node=4 --rdzv_id=100 --rdzv_backend=c10d --rdzv_endpoint=localhost:29400 \
-        note_llama_embeddings.py \
+    torchrun \
+        --nnodes=1 \
+        --nproc_per_node=2 \
+        --rdzv-id=$SLURM_JOB_ID \
+        --rdzv-backend=c10d \
+        --rdzv-endpoint=$RDZV_ENDPOINT \
+    note_llama_embeddings.py \
         --dataset lima \
-        --model_name_or_path=../results/baselines/huggyllama/llama-7b \
-        --save_dir=/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/llama-7b_outputs \
+        --model_name_or_path ../results/baselines/huggyllama/llama-7b \
+        --save_dir /gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs/llama-7b \
+        --use_dist \
+        --shuffle
     """
 
     import argparse
