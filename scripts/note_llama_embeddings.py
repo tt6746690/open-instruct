@@ -29,6 +29,7 @@ def compute_losses(logits, labels):
     """
     if logits.shape[0]!=1:
         raise ValueError('compute_el2n supports bsz=1 only.')
+
     vocab_size = logits.shape[-1]
     device = logits.device
     # Shift so that tokens < n predict n
@@ -41,9 +42,6 @@ def compute_losses(logits, labels):
     shift_labels = shift_labels.view(-1)
     # only compute loss on the output tokens
     output_tok_indices = (shift_labels != -100).nonzero().reshape(-1)
-    # if no output tokens return nan
-    if output_tok_indices.size()[0] == 0:
-        return torch.tensor(np.nan, device=device)
     shift_labels = shift_labels[output_tok_indices]
     shift_probs = shift_probs[output_tok_indices]
     shift_logits = shift_logits[output_tok_indices]
@@ -57,6 +55,7 @@ def compute_losses(logits, labels):
     loss_tokenwise = torch.linalg.norm(shift_probs_minus_onehot_target, dim=-1, ord=2)
     losses['el2n_agg=mean'] = loss_tokenwise.mean()
     losses['el2n_agg=l2n'] =  torch.linalg.norm(loss_tokenwise, ord=2)
+
     # Classification logit margin
     shift_logits_true = torch.gather(shift_logits, 1, shift_labels.view(-1, 1)).squeeze()
     shift_logits_other = shift_logits.clone()
@@ -64,6 +63,9 @@ def compute_losses(logits, labels):
     shift_logits_other_max, _ = torch.max(shift_logits_other, 1)
     losses['logit_margin'] = (shift_logits_true-shift_logits_other_max).mean()
 
+    # if no output tokens return nan
+    if output_tok_indices.size()[0] == 0:
+        losses = {k: torch.tensor(np.nan, device=device) for k in losses.keys()}
     return losses
 
 
@@ -247,9 +249,7 @@ def compute_lm_outputs(
 
         # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
         text_embedding = outputs['hidden_states'][-1].mean(1)
-        # average of output token log probs
-        log_prob = -outputs['loss']
-        # compute EL2N score
+        log_prob = -outputs['loss'] # average of output token log probs
         losses = compute_losses(outputs['logits'], batch['labels'])
 
         output['text_embedding'].append(text_embedding.detach().cpu().to(torch.float32))
