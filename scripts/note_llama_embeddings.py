@@ -3,6 +3,7 @@ from functools import partial
 import os
 import numpy as np
 import time
+import re
 
 import random
 import pickle
@@ -21,7 +22,44 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
 
 
+@torch.inference_mode()
+def compute_grad_statistic(model, patterns):
 
+    param_names = []
+    grads = []
+    for param_name, param in model.named_parameters():
+        if param.requires_grad and param.grad is not None:
+            param_names.append(param_name)
+            grads.append(param.grad.to(torch.float32))
+
+    statistic = {}
+    for pattern_name, pattern in patterns.items():
+        grads_filtered = list(filter(lambda x: True if re.search(pattern, x[0]) else False,
+                                     zip(param_names, grads)))
+        grads_filtered = [x[1] for x in grads_filtered]
+        norms = compute_grad_norm(grads_filtered)
+        for norm_type, v in norms.items():
+            statistic[f'{pattern_name}_{norm_type}'] = v
+
+    return statistic
+
+
+@torch.inference_mode()
+def compute_grad_norm(l):
+    """Given a list of Tensors `l`, compute 
+        - sum of norm, 
+        - norm of concatenated vectors. """
+    device = l[0].device
+    output = {}
+    # `l2n_sum` and `l2n` seems quite correlated, just compute 1.
+    # output['l2n_sum'] = torch.tensor(
+    #     sum([torch.linalg.norm(x.reshape(-1), ord=2).cpu().item() for x in l]), device=device)
+    g = torch.vstack([x.reshape(-1, 1) for x in l]).squeeze()
+    output['l2n'] = torch.linalg.norm(g, ord=2)
+    return output
+
+
+@torch.inference_mode()
 def compute_losses(logits, labels):
     """ Computes Error l2 Norm score for pruning.
         logits (Bsz, |Seq|, |Vocab|)
@@ -150,6 +188,7 @@ def compute_lm_outputs(
         use_dist=False,
         test_run=False,
         shuffle=False,
+        compute_grad=False,
     ):
     """
         `shuffle` to allow each process to process roughly similar workload cross the dataset 
@@ -175,6 +214,17 @@ def compute_lm_outputs(
     print(f'rank/local_rank/world_size: {rank}/{local_rank}/{world_size}\n')
 
     device = f'cuda:{str(local_rank)}'
+
+    if 'pythia' in model_name_or_path:
+        grad_statistic_patterns = {
+            'all': r'.*',
+            'qkv': r'\bquery_key_value\.weight\b',
+            'mlp': r'\bmlp\..*?\.weight\b',
+            'last': r'\bembed_out\.weight\b',
+        }
+    else:
+        raise ValueError(f'Cannot find regex `patterns` for {model_name_or_path}')
+    
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
@@ -244,18 +294,32 @@ def compute_lm_outputs(
     output = defaultdict(list)
     for batch in tqdm(loader, disable=rank!=0, total=len(loader)):
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
-        with torch.inference_mode():
-            outputs = model(**batch, output_hidden_states=True)
 
+        if compute_grad:
+            outputs = model(**batch, output_hidden_states=True)
+            model.zero_grad()
+            outputs['loss'].backward()
+        else:
+            with torch.inference_mode():
+                outputs = model(**batch, output_hidden_states=True)
+        
         # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
         text_embedding = outputs['hidden_states'][-1].mean(1)
-        log_prob = -outputs['loss'] # average of output token log probs
+        output['text_embedding'].append(text_embedding.to(torch.float32).detach().cpu())
+        
+        # average of output token log probs
+        output['log_prob'].append(-outputs['loss'].detach().cpu())
+        
+        # el2n scores
         losses = compute_losses(outputs['logits'], batch['labels'])
-
-        output['text_embedding'].append(text_embedding.detach().cpu().to(torch.float32))
-        output['log_prob'].append(log_prob.detach().cpu())
         for k in ['el2n_agg=mean', 'el2n_agg=l2n', 'logit_margin']:
             output[k].append(losses[k].detach().cpu())
+        
+        ## gradient statistic
+        if compute_grad:
+            grad_statistics = compute_grad_statistic(model, grad_statistic_patterns)
+            for k, v in grad_statistics.items():
+                output[f'grad_{k}'].append(v.detach().cpu())
 
     for k, v in output.items():
         output[k] = torch.vstack(v).to(torch.float32).numpy()
@@ -319,6 +383,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_dist", action='store_true', default=False)
     parser.add_argument("--test_run", action='store_true', default=False)
     parser.add_argument("--shuffle", action='store_true', default=False)
+    parser.add_argument("--compute_grad", action='store_true', default=False)
+
 
     args = parser.parse_args()
 
