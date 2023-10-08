@@ -173,19 +173,21 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
         d = {k: v[:1000] for k, v in d.items()}
         
     # some entries are nan, impute with mean value.
-    text_embeddings = d['text_embeddings']
-    log_probs = np.nan_to_num(d['log_probs'], nan=np.nanmean(d['log_probs'])).squeeze()
-    el2ns = np.nan_to_num(d['el2ns'], nan=np.nanmean(d['el2ns'])).squeeze()
+    text_embedding = d['text_embedding']
+    N = text_embedding.shape[0]
+    log_prob = np.nan_to_num(d['log_prob'], nan=np.nanmean(d['log_prob'])).squeeze()
 
     t0 = time.time()
-    if sort_by.startswith('random'):
+    if sort_by in ['log_prob', 
+                   'el2n_agg=mean', 
+                   'el2n_agg=l2n', 
+                   'logit_margin', 
+                   'grad_loraB_l2n']:
+        S = np.nan_to_num(d[sort_by], nan=np.nanmean(d[sort_by])).squeeze()
+    elif sort_by.startswith('random'):
         random.seed(0)
-        inds = list(range(log_probs.shape[0]))
+        inds = list(range(N))
         random.shuffle(inds)
-    elif sort_by == 'prob':
-        S = log_probs
-    elif sort_by == 'el2n':
-        S = el2ns
     if sort_by.startswith('kmeans'):
         dist_fn = 'l2' if sort_by.startswith('kmeansl2') else 'cd'
         match = re.search(r'(?<=\=)\d+', sort_by)
