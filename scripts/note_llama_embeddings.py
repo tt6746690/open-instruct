@@ -18,8 +18,47 @@ import torch.distributed as dist
 from datasets import load_dataset
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
+
+
+
+def get_grad_statistic_pattern(model_name_or_path, use_lora):
+    if use_lora:
+        grad_statistic_patterns = {
+            'loraB': r'lora_B\.[a-zA-Z_]+\.weight',
+        }
+    else:
+        if 'llama' in model_name_or_path:
+            grad_statistic_patterns = {
+                'all': r'.*',
+            }
+        elif 'pythia' in model_name_or_path:
+            grad_statistic_patterns = {
+                'all': r'.*',
+                'qkv': r'\bquery_key_value\.weight\b',
+                'mlp': r'\bmlp\..*?\.weight\b',
+                'last': r'\bembed_out\.weight\b',
+            }
+        else:
+            raise ValueError(f'Cannot find regex `patterns` for {model_name_or_path}')
+    return grad_statistic_patterns
+
+
+def print_trainable_parameters(model):
+    """
+    Prints the number of trainable parameters in the model.
+    """
+    trainable_params = 0
+    all_param = 0
+    for _, param in model.named_parameters():
+        all_param += param.numel()
+        if param.requires_grad:
+            trainable_params += param.numel()
+    print(
+        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
+    )
 
 
 @torch.inference_mode()
@@ -37,6 +76,8 @@ def compute_grad_statistic(model, patterns):
         grads_filtered = list(filter(lambda x: True if re.search(pattern, x[0]) else False,
                                      zip(param_names, grads)))
         grads_filtered = [x[1] for x in grads_filtered]
+        if not grads_filtered:
+            continue
         norms = compute_grad_norm(grads_filtered)
         for norm_type, v in norms.items():
             statistic[f'{pattern_name}_{norm_type}'] = v
@@ -189,6 +230,9 @@ def compute_lm_outputs(
         test_run=False,
         shuffle=False,
         compute_grad=False,
+        use_lora=False,
+        lora_rank=128,
+        lora_alpha=128,
     ):
     """
         `shuffle` to allow each process to process roughly similar workload cross the dataset 
@@ -215,22 +259,63 @@ def compute_lm_outputs(
 
     device = f'cuda:{str(local_rank)}'
 
-    if 'pythia' in model_name_or_path:
-        grad_statistic_patterns = {
-            'all': r'.*',
-            'qkv': r'\bquery_key_value\.weight\b',
-            'mlp': r'\bmlp\..*?\.weight\b',
-            'last': r'\bembed_out\.weight\b',
-        }
-    else:
-        raise ValueError(f'Cannot find regex `patterns` for {model_name_or_path}')
-    
-
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
         device_map=device,
         torch_dtype=torch.float16)
-    model.eval()
+    
+
+    if use_lora:
+        if not compute_grad:
+            raise ValueError('compute_grad must be True if use LoRA!')
+        
+        print(f'Initializing lora(r={lora_rank},a={lora_alpha})')
+        # ensure the same initialization
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+        
+        if 'llama' in model_name_or_path:
+            # target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
+            target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+        elif 'pythia' in model_name_or_path:
+            target_modules = ['query_key_value']
+        else:
+            raise ValueError(f'Define new `target_modules` for LoraConfig for {model_name_or_path}')
+
+        peft_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM, 
+            inference_mode=False, 
+            bias='none',
+            r=lora_rank,
+            lora_alpha=lora_alpha, 
+            lora_dropout=0.,
+            target_modules=target_modules,
+        )
+        
+        # https://github.com/huggingface/peft/issues/137
+        model.enable_input_require_grads()
+        model = get_peft_model(model, peft_config)
+        
+        ## don't need to compute gradient to `lora_A`, saves computation (i think) but not space.
+        for param_name, param in model.named_parameters():
+            if param.requires_grad and 'lora_A' in param_name:
+                param.requires_grad = False
+
+    print_trainable_parameters(model)
+        
+    if compute_grad:
+        if 'llama' in model_name_or_path:
+            # Computing full gradient for llama is computationally prohibitive.
+            # Use gradient checkpointing to prevent oom issues.
+            # Note gradient checkpointing is only applied when in training mode
+            #     https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L908
+            # So need to set `model.train()`. This is harmless because
+            # llama's eval/train computation is exactly the same, since there's no dropout layer.
+            model.gradient_checkpointing_enable()
+            model.train()
+    else:
+        model.eval()
+
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path, use_fast=True)
@@ -238,6 +323,7 @@ def compute_lm_outputs(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
+
 
     processed_dir = '../data/processed'
     if 'flan2022' in dataset:
@@ -291,12 +377,14 @@ def compute_lm_outputs(
         contiguous=True)
     loader = DataLoader(train_dataset, shuffle=False, batch_size=1, pin_memory=True) 
 
+    grad_statistic_patterns = get_grad_statistic_pattern(model_name_or_path, use_lora)
+
     output = defaultdict(list)
     for batch in tqdm(loader, disable=rank!=0, total=len(loader)):
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
         if compute_grad:
-            outputs = model(**batch, output_hidden_states=True)
+            outputs = model(**batch, output_hidden_states=True, use_cache=False)
             model.zero_grad()
             outputs['loss'].backward()
         else:
@@ -372,7 +460,9 @@ if __name__ == "__main__":
         --model_name_or_path ../results/baselines/huggyllama/llama-7b \
         --save_dir /gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs/llama-7b \
         --use_dist \
-        --shuffle
+        --shuffle \
+        --compute_grad \
+        --use_lora
     """
 
     import argparse
@@ -384,6 +474,9 @@ if __name__ == "__main__":
     parser.add_argument("--test_run", action='store_true', default=False)
     parser.add_argument("--shuffle", action='store_true', default=False)
     parser.add_argument("--compute_grad", action='store_true', default=False)
+    parser.add_argument("--use_lora", action='store_true', default=False)
+    parser.add_argument("--lora_rank", type=int, default=128)
+    parser.add_argument("--lora_alpha", type=int, default=128)
 
 
     args = parser.parse_args()
