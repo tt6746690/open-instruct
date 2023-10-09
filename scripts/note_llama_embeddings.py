@@ -33,6 +33,9 @@ def get_grad_statistic_pattern(model_name_or_path, use_lora):
         if 'llama' in model_name_or_path:
             grad_statistic_patterns = {
                 'all': r'.*',
+                'qkv': r'(q_proj\.weight|k_proj\.weight|v_proj\.weight|o_proj\.weight)',
+                'mlp': r'\bmlp\..*?\.weight\b',
+                'last': r'\blm_head\.weight\b',
             }
         elif 'pythia' in model_name_or_path:
             grad_statistic_patterns = {
