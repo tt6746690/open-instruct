@@ -185,7 +185,9 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
                    'grad_loraB_l2n']:
         S = np.nan_to_num(d[sort_by], nan=np.nanmean(d[sort_by])).squeeze()
     elif sort_by.startswith('random'):
-        random.seed(0)
+        match = re.search(r's=(\d+)', sort_by)
+        seed = int(match.group(1))
+        random.seed(seed)
         inds = list(range(N))
         random.shuffle(inds)
     if sort_by.startswith('kmeans'):
