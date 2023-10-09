@@ -192,11 +192,11 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
         dist_fn = 'l2' if sort_by.startswith('kmeansl2') else 'cd'
         match = re.search(r'(?<=\=)\d+', sort_by)
         n_clusters = int(match.group()) if match else None
-        S = sort_kmeans_dist_to_cluster_centers(text_embeddings, n_clusters, dist_fn=dist_fn)
+        S = sort_kmeans_dist_to_cluster_centers(text_embedding, n_clusters, dist_fn=dist_fn)
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None  
-        inds = sort_dpp_map(text_embeddings, log_probs, kernel_type=kernel_type)
+        inds = sort_dpp_map(text_embedding, log_prob, kernel_type=kernel_type)
     t1 = time.time()
     print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
 
