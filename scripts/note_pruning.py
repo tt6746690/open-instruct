@@ -63,7 +63,7 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
     P = kmeans.cluster_centers_[kmeans.labels_]
     if dist_fn == 'cd':
         P = P / np.linalg.norm(P, axis=1, ord=2)[:, np.newaxis]
-        D = np.sum(X*P, axis=1)
+        D = 1 - np.sum(X*P, axis=1) # cosine distance!
     else:
         D = np.linalg.norm(X - P, axis=1)
     
@@ -178,11 +178,15 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     log_prob = np.nan_to_num(d['log_prob'], nan=np.nanmean(d['log_prob'])).squeeze()
 
     t0 = time.time()
-    if sort_by in ['log_prob', 
-                   'el2n_agg=mean', 
-                   'el2n_agg=l2n', 
-                   'logit_margin', 
-                   'grad_loraB_l2n']:
+    if any(sort_by.startswith(x) for x in [
+            'log_prob', 
+            'el2n',  # el2n_agg=l2n, el2n_agg=mean
+            'logit_margin', 
+            'grad',  # grad_loraB_l2n, grad_qkv_l2n, grad_all_l2n, grad_last_l2n, grad_mlp_l2n
+        ]):
+        if sort_by not in d:
+            print(f'sort_by={sort_by} not in lm_output_dir={lm_output_dir}')
+            return
         S = np.nan_to_num(d[sort_by], nan=np.nanmean(d[sort_by])).squeeze()
     elif sort_by.startswith('random'):
         match = re.search(r's=(\d+)', sort_by)
