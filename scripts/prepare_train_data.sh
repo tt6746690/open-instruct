@@ -138,3 +138,10 @@ cat data/processed/flan_v2/flan_v2_data.jsonl \
     data/processed/oasst1/oasst1_data.jsonl \
     data/processed/lima/lima_data.jsonl \
     > data/processed/tulu/tulu_v2_human_mix.jsonl
+
+
+mkdir -p data/processed/wpq
+
+cat data/processed/cot/cot_data.jsonl \
+    data/processed/flan_v2/flan_v2_data.jsonl \
+    > data/processed/wpq/cot_flanv2_data.jsonl
