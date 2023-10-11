@@ -197,7 +197,7 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     if sort_by.startswith('kmeans'):
         dist_fn = 'l2' if sort_by.startswith('kmeansl2') else 'cd'
         match = re.search(r'(?<=\=)\d+', sort_by)
-        n_clusters = int(match.group()) if match else None
+        n_clusters = min(int(match.group()), int(len(text_embedding)*.1)) if match else None
         S = sort_kmeans_dist_to_cluster_centers(text_embedding, n_clusters, dist_fn=dist_fn)
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
