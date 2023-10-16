@@ -72,7 +72,7 @@ def compute_grad_statistic(model, patterns):
     for param_name, param in model.named_parameters():
         if param.requires_grad and param.grad is not None:
             param_names.append(param_name)
-            grads.append(param.grad.to(torch.float32))
+            grads.append(param.grad.cpu().to(torch.float32))
 
     statistic = {}
     for pattern_name, pattern in patterns.items():
