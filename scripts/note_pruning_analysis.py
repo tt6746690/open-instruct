@@ -22,20 +22,21 @@ from datasets import load_dataset
 
 
 assets_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/assets/'
+data_raw_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/data/raw_train'
 processed_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/data/processed'
 data_inds_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data_inds'
 lm_output_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs'
 
 
-def get_dataset(dataset):
+def get_dataset(dataset, processed=True):
+    data_dir = processed_dir if processed else data_raw_dir
     if 'tulu' in dataset:
-        train_file = os.path.join(processed_dir, 'tulu', f'{dataset}.jsonl')
+        train_file = os.path.join(data_dir, 'tulu', f'{dataset}.jsonl')
     elif 'flan2022' in dataset:
-        train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
+        train_file = os.path.join(data_dir, 'flan2022', f'{dataset}_data.jsonl' if processed else f'{dataset}.jsonl')
     else:
-        train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
-    data_files = {'train': train_file}
-    ds = load_dataset('json', data_files=data_files)['train']
+        train_file = os.path.join(data_dir, dataset, f'{dataset}_data.jsonl')
+    ds = load_dataset('json', data_files={'train': train_file}, split='train', cache_dir=data_dir)
     return ds
 
 
