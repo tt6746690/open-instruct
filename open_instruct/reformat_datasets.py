@@ -153,7 +153,9 @@ def convert_flan2022_data(data_dir, output_dir):
             ]}
 
     input_files = [
-        'flan2022_1m.jsonl',
+        # 'flan2022_1m.jsonl',
+        # 'flan2022v2_1m.jsonl',
+        'flan2022v1_1m.jsonl',
     ]
     for input_file in input_files:
         output_path = os.path.join(output_dir, input_file.split('.jsonl')[0]+'_data.jsonl')
