@@ -10,6 +10,8 @@ import pickle
 from tqdm import tqdm 
 import datetime
 
+from sklearn.random_projection import SparseRandomProjection
+
 import pyarrow # import before `torch`, `transformers`, `datasets`
 import torch
 from torch.utils.data import DataLoader
@@ -24,6 +26,73 @@ from open_instruct.finetune_trainer import encode_with_prompt_completion_format,
 
 
 
+def sklearn_rp_mat_size(rp):
+    if hasattr(rp, "components_"):
+        n_bytes = rp.components_.data.nbytes
+        n_bytes += rp.components_.indices.nbytes
+        return n_bytes
+    
+
+def torch_cdist(X, device):
+    """Compute cdist on gpu."""
+    if isinstance(X, np.ndarray):
+        X = torch.from_numpy(X)
+    X = X.to(torch.float32).to(device).unsqueeze(0)
+    D = torch.cdist(X, X)
+    D = D.cpu().numpy()
+    return D
+    
+
+def plt_pair_of_dists(D1, D2, n_components, use_hexbin=True):
+    import matplotlib.pyplot as plt
+
+    plt.rcParams.update({'font.size': 16})
+
+    fig, axs = plt.subplots(1,2,figsize=(12,6))
+    ax = axs[0]
+    min_dist = min(D2.min(), D1.min())
+    max_dist = max(D2.max(), D1.max())
+    max_dist = max(np.quantile(D2, .95), np.quantile(D1, .95))
+    if use_hexbin:
+        hb = ax.hexbin(
+            D1,
+            D2,
+            gridsize=100,
+            cmap=plt.cm.PuBu,
+            extent=[min_dist, max_dist, min_dist, max_dist],
+        )
+        cb = plt.colorbar(hb, ax=ax)
+        cb.set_label("Sample pairs counts")
+    else:
+        ax.scatter(D1, D2, s=1, alpha=0.1)
+        ax.set_xlim(min_dist, max_dist)
+        ax.set_ylim(min_dist, max_dist)
+    ax.plot([min_dist, max_dist], [min_dist, max_dist], color='red', linestyle='--')
+    ax.set_xlabel("Pairwise dist original")
+    ax.set_ylabel("Pairwise dist projected")
+    ax.set_title(f"Pairwise dist (M={n_components})")
+
+    
+
+    rates = D2 / D1
+
+    ax = axs[1]
+    ax.hist(rates, bins=50, range=(0.0, 2.0), edgecolor="k", density=True)
+
+    rates_mean, rates_std = np.mean(rates), np.std(rates)
+    ax.axvline(rates_mean, color='r', linestyle='dashed', linewidth=2, label=f'Mean: {rates_mean:.2f}')
+    ax.axvline(rates_mean + 2 * rates_std, color='g', linestyle='dashed', linewidth=2, label=f'2*std: {2*rates_std:.2f}')
+    ax.axvline(rates_mean - 2 * rates_std, color='g', linestyle='dashed', linewidth=2)
+    ax.legend()
+    ax.set_xlabel("distances rate: projected / original")
+    ax.set_ylabel("Distribution of samples pairs")
+    ax.set_title(f"Pairwise projected_dist/dist (M={n_components})")
+
+    fig.tight_layout()
+
+    return fig, axs
+
+    
 def get_grad_statistic_pattern(model_name_or_path, use_lora):
     if use_lora:
         grad_statistic_patterns = {
@@ -105,7 +174,7 @@ def compute_grad_norm(l):
 
 
 @torch.inference_mode()
-def compute_grad_embeddings(model, patterns):
+def gather_grad_embeddings(model, patterns, stacked=True):
 
     param_names = []
     grads = []
@@ -121,8 +190,9 @@ def compute_grad_embeddings(model, patterns):
         g = [x[1] for x in grads_filtered]
         if not grads_filtered:
             continue
-
-        g = np.stack(g).reshape(-1)
+        
+        if stacked:
+            g = np.stack(g).reshape(-1)
         grad_embeddings[pattern_name] = g
         
     return grad_embeddings
@@ -261,6 +331,8 @@ def compute_lm_outputs(
         use_lora=False,
         lora_rank=128,
         lora_alpha=128,
+        compute_grad_embeddings=False,
+        grad_randproj_components=2048,
     ):
     """
         `shuffle` to allow each process to process roughly similar workload cross the dataset 
@@ -332,9 +404,9 @@ def compute_lm_outputs(
     print_trainable_parameters(model)
         
     if compute_grad:
-        if 'llama' in model_name_or_path and not use_lora:
-            # Computing full gradient for llama is computationally prohibitive.
-            # Use gradient checkpointing to prevent oom issues.
+        if 'llama' in model_name_or_path:
+            # Computing full gradient for llama or even lora's weight matrix is 
+            # computationally prohibitive. Use gradient checkpointing to prevent oom issues.
             # Note gradient checkpointing is only applied when in training mode
             #     https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L908
             # So need to set `model.train()`. This is harmless because
@@ -407,8 +479,13 @@ def compute_lm_outputs(
 
     grad_statistic_patterns = get_grad_statistic_pattern(model_name_or_path, use_lora)
 
+    if compute_grad_embeddings:
+        rps = {}
+        for k in grad_statistic_patterns.keys():
+            rps[k] = SparseRandomProjection(n_components=grad_randproj_components, random_state=0)
+
     output = defaultdict(list)
-    for batch in tqdm(loader, disable=rank!=0, total=len(loader)):
+    for i, batch in tqdm(enumerate(loader), disable=rank!=0, total=len(loader)):
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
         if compute_grad:
@@ -431,14 +508,40 @@ def compute_lm_outputs(
         for k in ['el2n_agg=mean', 'el2n_agg=l2n', 'logit_margin']:
             output[k].append(losses[k].detach().cpu())
         
-        ## gradient statistic
         if compute_grad:
+            ## gradient statistic
             grad_statistics = compute_grad_statistic(model, grad_statistic_patterns)
             for k, v in grad_statistics.items():
                 output[f'grad_{k}'].append(v.detach().cpu())
 
+            ## gradient embeddings
+            if compute_grad_embeddings:
+                grad_embeddings = gather_grad_embeddings(
+                    model,
+                    {k: v for k, v in grad_statistic_patterns.items() if k in ['qkv', 'loraB']},
+                    stacked=True,
+                )
+                if test_run:
+                    for k, v in grad_embeddings.items():
+                        output[f'grad_{k}'].append(v)
+                if i==0:
+                    for k, v in grad_embeddings.items():
+                        t0 = time.time()
+                        print(f"Fitting random projection for {k} ({v.size} -> {grad_randproj_components})")
+                        rps[k] = rps[k].fit(v[np.newaxis,...])
+                        print(f"Fitting random projection in {time.time() - t0:0.3f}s "
+                            f"with random matrix size {sklearn_rp_mat_size(rps[k]) / 1e6:0.3f} MB")
+                for k in grad_embeddings.keys():
+                    rp = rps[k]
+                    g = grad_embeddings[k]
+                    output[f'grad_rp_{k}'].append(rp.transform(g[np.newaxis,...]).squeeze())
+
+
     for k, v in output.items():
-        output[k] = torch.vstack(v).to(torch.float32).numpy()
+        if isinstance(v, torch.Tensor):
+            output[k] = torch.vstack(v).to(torch.float32).numpy()
+        else:
+            output[k] = np.vstack(v)
 
     print(f'[local_rank/global={local_rank}/{rank}] '
           f'output={[(k, v.shape) for k, v in output.items()]}')
@@ -490,7 +593,9 @@ if __name__ == "__main__":
         --use_dist \
         --shuffle \
         --compute_grad \
-        --use_lora
+        --use_lora \
+        --compute_grad_embeddings \
+        --grad_randproj_components 2048
     """
 
     import argparse
@@ -505,6 +610,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_lora", action='store_true', default=False)
     parser.add_argument("--lora_rank", type=int, default=128)
     parser.add_argument("--lora_alpha", type=int, default=128)
+    parser.add_argument("--compute_grad_embeddings", action='store_true', default=False)
+    parser.add_argument("--grad_randproj_components", type=int, default=2048)
 
 
     args = parser.parse_args()
