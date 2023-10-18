@@ -86,6 +86,7 @@ def compute_grad_statistic(model, patterns):
             statistic[f'{pattern_name}_{norm_type}'] = v
 
     return statistic
+    
 
 
 @torch.inference_mode()
@@ -101,6 +102,30 @@ def compute_grad_norm(l):
     g = torch.vstack([x.reshape(-1, 1) for x in l]).squeeze()
     output['l2n'] = torch.linalg.norm(g, ord=2)
     return output
+
+
+@torch.inference_mode()
+def compute_grad_embeddings(model, patterns):
+
+    param_names = []
+    grads = []
+    for param_name, param in model.named_parameters():
+        if param.requires_grad and param.grad is not None:
+            param_names.append(param_name)
+            grads.append(param.grad.cpu().to(torch.float32).numpy())
+
+    grad_embeddings = {}
+    for pattern_name, pattern in patterns.items():
+        grads_filtered = list(filter(lambda x: True if re.search(pattern, x[0]) else False,
+                                     zip(param_names, grads)))
+        g = [x[1] for x in grads_filtered]
+        if not grads_filtered:
+            continue
+
+        g = np.stack(g).reshape(-1)
+        grad_embeddings[pattern_name] = g
+        
+    return grad_embeddings
 
 
 @torch.inference_mode()
