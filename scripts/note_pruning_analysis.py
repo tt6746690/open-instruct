@@ -41,6 +41,8 @@ def get_dataset(dataset, processed=True):
     else:
         if dataset == 'lima':
             train_file = os.path.join(data_raw_dir, 'lima', 'train.jsonl')
+        elif 'flan2022' in dataset:
+            train_file = os.path.join(data_raw_dir, 'flan2022', f'{dataset}.jsonl')
         else:
             train_file = os.path.join(data_raw_dir, dataset)
     ds = load_dataset('json', data_files={'train': train_file}, split='train', cache_dir=data_dir)
