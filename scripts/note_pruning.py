@@ -45,9 +45,7 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
         kmeans_fn_kwargs = {}
     else:
         raise ValueError(f'Invalid kmeans_type={kmeans_type}')
-    
-    print(f'Running {kmeans_cls} to compute {"euclidean" if dist_fn == "l2" else "cosine"} distance to cluster centers.')
-    
+        
     X = X.astype(np.float64)
     kmeans = kmeans_cls(
         n_clusters=n_clusters, 
@@ -173,16 +171,15 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
         d = {k: v[:1000] for k, v in d.items()}
         
     # some entries are nan, impute with mean value.
-    text_embedding = d['text_embedding']
-    N = text_embedding.shape[0]
+    N = d['text_embedding'].shape[0]
     log_prob = np.nan_to_num(d['log_prob'], nan=np.nanmean(d['log_prob'])).squeeze()
 
     t0 = time.time()
     if any(sort_by.startswith(x) for x in [
             'log_prob', 
-            'el2n',  # el2n_agg=l2n, el2n_agg=mean
+            'el2n',  # el2n_agg={l2n|mean}
             'logit_margin', 
-            'grad',  # grad_loraB_l2n, grad_qkv_l2n, grad_all_l2n, grad_last_l2n, grad_mlp_l2n
+            'grad',  # grad_{loraB|qkv|all|last}_l2n
         ]):
         if sort_by not in d:
             print(f'sort_by={sort_by} not in lm_output_dir={lm_output_dir}')
@@ -196,13 +193,24 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
         random.shuffle(inds)
     if sort_by.startswith('kmeans'):
         dist_fn = 'l2' if sort_by.startswith('kmeansl2') else 'cd'
-        match = re.search(r'(?<=\=)\d+', sort_by)
-        n_clusters = min(int(match.group()), int(len(text_embedding)*.1)) if match else None
-        S = sort_kmeans_dist_to_cluster_centers(text_embedding, n_clusters, dist_fn=dist_fn)
+        match = re.search(r'nc=(\d+)', sort_by)
+        n_clusters = int(match.group(1)) if match else None
+        match = re.search(r'emb=([^_]+)', sort_by)
+        embed_type = re.sub(r'[+]', '_', match.group(1)) if match else 'text_embedding'
+        if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
+            raise ValueError(f'Invalid embed_type = {embed_type}')
+        emb = d[embed_type]
+        print(f'Running kmeans(n_clusters={n_clusters}) {{ {embed_type} }} to compute {"euclidean" if dist_fn == "l2" else "cosine"} distance to cluster centers.')
+        S = sort_kmeans_dist_to_cluster_centers(emb, n_clusters, dist_fn=dist_fn)
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
-        kernel_type = match.group(1) if match else None  
-        inds = sort_dpp_map(text_embedding, log_prob, kernel_type=kernel_type)
+        kernel_type = match.group(1) if match else None
+        match = re.search(r'emb=([^_]+)', sort_by)
+        embed_type = re.sub(r'[+]', '_', match.group(1)) if match else 'text_embedding'
+        if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
+            raise ValueError(f'Invalid embed_type = {embed_type}')
+        emb = d[embed_type]
+        inds = sort_dpp_map(emb, log_prob, kernel_type=kernel_type)
     t1 = time.time()
     print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
 

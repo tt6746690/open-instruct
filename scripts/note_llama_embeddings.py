@@ -531,6 +531,8 @@ def compute_lm_outputs(
                         rps[k] = rps[k].fit(v[np.newaxis,...])
                         print(f"Fitting random projection in {time.time() - t0:0.3f}s "
                             f"with random matrix size {sklearn_rp_mat_size(rps[k]) / 1e6:0.3f} MB")
+                        print('Log statistics of projection matrix to ensure same initialization cross procs:\n'
+                              f"{np.mean(rps[k].components_ != 0)}, {np.max(rps[k].components_)}, {np.mean(rps[k].components_[0])}")
                 for k in grad_embeddings.keys():
                     rp = rps[k]
                     g = grad_embeddings[k]
