@@ -39,7 +39,9 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
         kmeans_type = 'kmeans' if len(X) <= 100000 else 'minibatch_kmeans'
     if kmeans_type == 'minibatch_kmeans':
         kmeans_cls = MiniBatchKMeans
-        kmeans_fn_kwargs = {'batch_size': 256}
+        # need to increase the batch size! otherwise makes no progress and stops early.
+        kmeans_fn_kwargs = {'batch_size': 512, 'max_no_improvement': 50}
+        print(kmeans_fn_kwargs)
     elif kmeans_type == 'kmeans':
         kmeans_cls = KMeans
         kmeans_fn_kwargs = {}
