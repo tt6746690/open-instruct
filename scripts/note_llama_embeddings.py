@@ -250,7 +250,9 @@ def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
         
     mixes = {
         'tulu_v1_human_mix': ['flan_v2', 'cot', 'dolly', 'oasst1'],
+        'tulu_v1_mix': ['flan_v2', 'cot', 'dolly', 'oasst1', 'gpt4_alpaca', 'code_alpaca', 'sharegpt'],
         'tulu_v2_human_mix': ['flan_v2', 'cot', 'oasst1', 'lima'],
+        'tulu_v1_mix': ['flan_v2', 'cot', 'oasst1', 'lima', 'code_alpaca', 'sharegpt', 'wizardlm', 'open_orca']
     }
 
     mix_name = dataset
@@ -341,7 +343,10 @@ def compute_lm_outputs(
 
     os.makedirs(save_dir, exist_ok=True)
 
-    if dataset in ['tulu_v1_human_mix', 'tulu_v2_human_mix']:
+    if dataset in ['tulu_v1_human_mix', 
+                   'tulu_v1_mix',
+                   'tulu_v2_human_mix',
+                   'tulu_v2_mix']:
         combine_lm_outputs_for_mixes(dataset, save_dir, test_run)
         return
 
