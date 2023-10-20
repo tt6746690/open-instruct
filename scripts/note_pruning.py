@@ -15,12 +15,14 @@ def save_to_pickle(save_path, output):
         pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def save_sorted_inds(save_dir, S, sort_by, reverse=False):
+def save_sorted_inds(save_dir, S, sort_by, reverse=False, extra=None):
     save_path = os.path.join(save_dir, f'{sort_by}_{"decr" if reverse else "incr"}.pkl')
     inds = np.argsort(S).tolist()
     if reverse:
         inds = inds[::-1]
     output = {'inds': inds, 'S': S[inds].tolist()}
+    if extra:
+        output.update(extra)
     save_to_pickle(save_path, output)
 
     
@@ -71,7 +73,7 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
     else:
         D = np.linalg.norm(X - P, axis=1)
     
-    return D
+    return D, kmeans
 
 
 def cholesky_jitter(K, jitter=1e-5):
@@ -94,7 +96,7 @@ def sort_dpp_map(X, logP, kernel_type='Kcos'):
     # S = T@T.T out-of-memory
     # use block-wise matmul to reduce peak memory usage.
     L = []
-    for Xn in torch.split(X, 10000):
+    for Xn in torch.split(X, 3000):
         L.append((Xn@X.T).to('cpu'))
     S = torch.vstack(L)
     
@@ -117,7 +119,7 @@ def sort_dpp_map(X, logP, kernel_type='Kcos'):
     return inds 
 
 
-def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos'):
+def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos', torch_compile=False):
     """O(N) memory instead of O(N^2) memory, due to lazily evalute kernel matrix."""
     import sys
     sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
@@ -128,8 +130,11 @@ def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos'):
 
     N = P.shape[0]
 
-    X = torch.from_numpy(X).to('cuda')
-    X = torch.nn.functional.normalize(X, dim=-1)
+    if torch_compile:
+        X = X / np.linalg.norm(X, axis=-1, ord=2, keepdims=True)
+    else:
+        X = torch.from_numpy(X).to('cuda')
+        X = torch.nn.functional.normalize(X, dim=-1)
 
     jitter = 1e-3
 
@@ -145,7 +150,10 @@ def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos'):
             raise ValueError(f'kernel_type={kernel_type} not supported')
         Ki = Ki.squeeze()
         Ki[i] += jitter
-        return Ki.to('cpu').numpy()
+        if torch_compile:
+            return Ki
+        else:
+            return Ki.to('cpu').numpy()
 
     def kernel_matrix_diag():
         if kernel_type == 'Kcos':
@@ -158,9 +166,16 @@ def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos'):
             raise ValueError(f'kernel_type={kernel_type} not supported')
         Kdiag = Kdiag.squeeze()
         Kdiag += jitter
-        return Kdiag.to('cpu').numpy()
+        if torch_compile:
+            return Kdiag
+        else:
+            return Kdiag.to('cpu').numpy()
          
-    max_length = min(30000, int(.3*N))
+    max_length = min(50000, int(.3*N))
+    if torch_compile:
+        dpp_lazy = torch.compile(dpp_lazy)
+        kernel_matrix_ith_row = torch.compile(kernel_matrix_ith_row)
+        kernel_matrix_diag = torch.compile(kernel_matrix_diag)
     inds = dpp_lazy(N, kernel_matrix_ith_row, kernel_matrix_diag, max_length, jitter)
     if len(inds) != N:
         print(f'dpp map len(indices)={len(inds)} != {N} = N')
@@ -179,6 +194,8 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     # some entries are nan, impute with mean value.
     N = d['text_embedding'].shape[0]
     log_prob = np.nan_to_num(d['log_prob'], nan=np.nanmean(d['log_prob'])).squeeze()
+
+    pkl_extra = {}
 
     t0 = time.time()
     if any(sort_by.startswith(x) for x in [
@@ -207,7 +224,8 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
             raise ValueError(f'Invalid embed_type = {embed_type}')
         emb = d[embed_type]
         print(f'Running kmeans(n_clusters={n_clusters}) {{ {embed_type} }} to compute {"euclidean" if dist_fn == "l2" else "cosine"} distance to cluster centers.')
-        S = sort_kmeans_dist_to_cluster_centers(emb, n_clusters, dist_fn=dist_fn)
+        S, kms = sort_kmeans_dist_to_cluster_centers(emb, n_clusters, dist_fn=dist_fn)
+        pkl_extra['kmeans'] = kms
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None
@@ -216,17 +234,21 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
         if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
             raise ValueError(f'Invalid embed_type = {embed_type}')
         emb = d[embed_type]
-        inds = sort_dpp_map(emb, log_prob, kernel_type=kernel_type)
+        inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
+
     t1 = time.time()
     print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
 
     if any(sort_by.startswith(x) for x in ['dpp', 'random']):
+        output = {'inds': inds}
+        if pkl_extra:
+            output.update(pkl_extra)
         save_to_pickle(
             save_path=os.path.join(save_dir, f'{sort_by}.pkl'),
-            output={'inds': inds})
+            output=output)
     else:
-        save_sorted_inds(save_dir, S, sort_by, reverse=False)
-        save_sorted_inds(save_dir, S, sort_by, reverse=True)
+        save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=False)
+        save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=True)
 
 
 

@@ -253,7 +253,7 @@ def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
         'tulu_v1_human_mix': ['flan_v2', 'cot', 'dolly', 'oasst1'],
         'tulu_v1_mix': ['flan_v2', 'cot', 'dolly', 'oasst1', 'gpt4_alpaca', 'code_alpaca', 'sharegpt'],
         'tulu_v2_human_mix': ['flan_v2', 'cot', 'oasst1', 'lima'],
-        'tulu_v1_mix': ['flan_v2', 'cot', 'oasst1', 'lima', 'code_alpaca', 'sharegpt', 'wizardlm', 'open_orca']
+        'tulu_v2_mix': ['flan_v2', 'cot', 'oasst1', 'lima', 'code_alpaca', 'sharegpt', 'wizardlm', 'open_orca']
     }
 
     mix_name = dataset
