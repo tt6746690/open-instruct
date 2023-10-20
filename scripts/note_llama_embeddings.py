@@ -248,6 +248,7 @@ def compute_losses(logits, labels):
 
 def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
         
+    # Need to keep the same order as specified in `prepare_train_data.sh`
     mixes = {
         'tulu_v1_human_mix': ['flan_v2', 'cot', 'dolly', 'oasst1'],
         'tulu_v1_mix': ['flan_v2', 'cot', 'dolly', 'oasst1', 'gpt4_alpaca', 'code_alpaca', 'sharegpt'],
@@ -256,7 +257,7 @@ def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
     }
 
     mix_name = dataset
-    mix_datasets = mixes[dataset]
+    mix_datasets = mixes[dataset] 
 
     output_list = []
     for dataset in mix_datasets:
@@ -484,11 +485,6 @@ def compute_lm_outputs(
 
     grad_statistic_patterns = get_grad_statistic_pattern(model_name_or_path, use_lora)
 
-    if compute_grad_embeddings:
-        rps = {}
-        for k in grad_statistic_patterns.keys():
-            rps[k] = SparseRandomProjection(n_components=grad_randproj_components, random_state=0)
-
     output = defaultdict(list)
     for i, batch in tqdm(enumerate(loader), disable=rank!=0, total=len(loader)):
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
@@ -530,8 +526,10 @@ def compute_lm_outputs(
                     for k, v in grad_embeddings.items():
                         output[f'grad_{k}'].append(v)
                 if i==0:
+                    rps = {}
                     for k, v in grad_embeddings.items():
                         t0 = time.time()
+                        rps[k] = SparseRandomProjection(n_components=grad_randproj_components, random_state=0)
                         print(f"Fitting random projection for {k} ({v.size} -> {grad_randproj_components})")
                         rps[k] = rps[k].fit(v[np.newaxis,...])
                         print(f"Fitting random projection in {time.time() - t0:0.3f}s "

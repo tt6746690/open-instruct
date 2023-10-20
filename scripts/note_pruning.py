@@ -43,8 +43,8 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
         # https://stackoverflow.com/questions/21447351/minibatchkmeans-parameters
         # - might want to decrease reassignment_ratio for low n_clusters.
         kmeans_fn_kwargs = {'batch_size': 512, 
-                            'max_no_improvement': 50,
-                            'reassignment_ratio': 1e-4 if n_clusters>=1000 else 1e-3,}
+                            'max_no_improvement': 100,
+                            'reassignment_ratio': 1e-4,}
         print(kmeans_fn_kwargs)
     elif kmeans_type == 'kmeans':
         kmeans_cls = KMeans
