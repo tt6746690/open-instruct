@@ -30,12 +30,11 @@ tensorboard==2.13.0
 omegaconf
 pynvml
 openai
+tiktoken
+alpaca-eval==0.3.1
 
 # ppc64le build fails
-# tiktoken
 # https://github.com/SamuraiT/mecab-python3/issues/95
-# mecab-python3 # cannot eval xorqa
-# git+https://github.com/hamishivi/alpaca_farm.git # requires tiktoken
 
 # ppc64le has V100 mostly, cannot use flash attention anyways.
 # flash-attn
