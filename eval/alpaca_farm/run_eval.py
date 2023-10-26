@@ -98,15 +98,15 @@ def main(args):
         is_return_instead_of_print=True,
     )
 
-    prices = [x['price_per_example'] for x in annotations]
-    print(f'Price (per-example / total) = {np.mean(prices):.4f} / {np.sum(prices):.2f}')
+    prices = np.array([x['price_per_example'] for x in annotations], dtype=np.float32)
+    print(f'Price (per-example / total) = {np.nanmean(prices):.4f} / {np.nansum(prices):.2f}')
 
-    times = [x['time_per_example'] for x in annotations]
-    print(f'Time  (per-example / total) = {np.mean(times):.4f} / {np.sum(times):.2f}')
+    times = np.array([x['time_per_example'] for x in annotations], dtype=np.float32)
+    print(f'Time  (per-example / total) = {np.nanmean(times):.4f} / {np.nansum(times):.2f}')
 
     df_leaderboard['avg_output_tok_length'] = np.mean(
         [len(tokenizer(x['output'])['input_ids']) for x in model_results])
-    df_leaderboard['price'] = np.sum(prices)
+    df_leaderboard['price'] = np.nansum(prices)
     df_leaderboard.insert(0, 'model', df_leaderboard.index)
     df_leaderboard = df_leaderboard.reset_index(drop=True)
 
