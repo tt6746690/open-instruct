@@ -1,7 +1,8 @@
+# -e /gpfs/u/scratch/PTFM/PTFMqngp/github/rosemary
+-e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023
 # wpq: added torch version
 --extra-index-url https://download.pytorch.org/whl/cu118
-torch==2.0.0+cu118
-scipy
+torch # torch=2.1.0+cu18
 packaging
 sentencepiece
 datasets
@@ -12,14 +13,18 @@ bitsandbytes>=0.41.1
 evaluate>=0.4.0
 tokenizers>=0.13.3
 protobuf
+<<<<<<< HEAD
 # transformers>=4.31.0
 # Follwing is a temporary fix for a bug in the left padding in the transformers library
 # See https://github.com/huggingface/transformers/pull/25284
 git+https://github.com/Randolph-zeng/transformers.git@Randolph-zeng-patch-1
+=======
+-e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/transformers
+huggingface_hub
+>>>>>>> 2930706... add
 openai
 tiktoken
 rouge_score
-tensorboard
 wandb
 gradio
 termcolor
@@ -29,10 +34,10 @@ einops
 # wpq: gives cuda version 12.1 mismatch with version pytorch is compiled with (11.8) error and it doesn't seem to be an easy fix.
 # open-instruct uses flash-attn for llama model. so fix this if I need to use llama for anything.
 # flash-attn
+scipy
 auto-gptq
 fire
-# alpaca-farm eval - my fork with some fixes.
-git+https://github.com/hamishivi/alpaca_farm.git
+alpaca-eval==0.3.1
 # for human eval web app
 flask
 vllm 
@@ -44,3 +49,7 @@ tensorboard
 omegaconf
 # wpq: monitor memory usage
 pynvml
+notebook
+pyarrow
+matplotlib
+tensorboard
