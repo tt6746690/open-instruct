@@ -28,6 +28,37 @@ data_inds_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/o
 lm_output_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs'
 
 
+def get_dataset_size(data_dir = 'data/processed'):
+    """
+        ```
+        df = get_dataset_size()
+        markdown_table = df.to_markdown(index=False)
+        print(markdown_table)
+        ```
+    """
+    import pandas as pd
+
+    paths = glob.glob(os.path.join(data_dir, '*/*.jsonl'))
+    ds_len = {}
+    for path in paths:
+        ds = load_dataset('json', 
+                          data_files={'train': path}, 
+                          split='train', 
+                          cache_dir=os.path.dirname(path))
+        basename = os.path.basename(path)
+        if 'data' in basename:
+            name = basename.split('_data')[0]
+        else:
+            name = basename.split('.')[0]
+        ds_len[name] = len(ds)
+
+    df = pd.DataFrame(list(ds_len.items()), columns=['dataset', 'length'])
+    df = df.sort_values('dataset')
+    df['length'] = df['length'].apply(lambda x: '{:,.0f}'.format(x))
+    return df
+
+
+    
 def get_dataset(dataset, processed=True):
     data_dir = processed_dir if processed else data_raw_dir
 
@@ -47,7 +78,7 @@ def get_dataset(dataset, processed=True):
             train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.jsonl')
         else:
             train_file = os.path.join(data_raw_dir, dataset)
-    ds = load_dataset('json', data_files={'train': train_file}, split='train', cache_dir=data_dir)
+    ds = load_dataset('json', data_files={'train': train_file}, split='train', cache_dir=os.path.dirname(train_file))
     return ds
 
 
