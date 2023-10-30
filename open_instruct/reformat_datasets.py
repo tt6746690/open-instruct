@@ -553,8 +553,27 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=100000, num_g
                 "dataset": "open_orca",
                 "id": f"open_orca_{example['id']}",
                 "messages": messages,
-            }) + "\n")    
-        
+            }) + "\n")
+
+
+def convert_ultrachat_data(data_dir, output_dir):
+    from datasets import load_dataset
+    output_path = os.path.join(output_dir, 'ultrachat_data.jsonl')
+    ds = load_dataset(
+        'HuggingFaceH4/ultrachat_200k',
+        cache_dir=data_dir,
+        split='train_sft')
+    def add_metadata_fn(example, idx):
+        example.update({'dataset': 'ultrachat', 'id': f'ultrachat_{idx}'})
+        return example
+    ds = ds.map(add_metadata_fn, 
+                remove_columns=['prompt', 'prompt_id'], 
+                with_indices=True, 
+                num_proc=10, 
+                keep_in_memory=True)
+    ds.to_json(output_path)
+
+
 
 def get_all_supported_datasets():   
     supported_datasets = []
