@@ -12,7 +12,8 @@ git+https://github.com/huggingface/peft.git
 evaluate
 tokenizers
 protobuf
-transformers
+# transformers
+git+https://github.com/huggingface/transformers.git@v4.34.0
 huggingface_hub
 openai
 rouge_score

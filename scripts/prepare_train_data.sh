@@ -93,6 +93,9 @@ wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/Open
 #
 # # reformat flan2022 mixture data resampled 1m
 # python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset flan2022
+#
+# # reformat ultrachat 200k
+# python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset ultrachat
 
 
 echo "Reformatting the datasets..."
