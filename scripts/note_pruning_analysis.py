@@ -3,6 +3,8 @@ import sys
 import numpy as np
 import time
 import re
+import random
+import json
 from functools import partial
 
 from collections import defaultdict
@@ -26,6 +28,9 @@ data_raw_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/op
 processed_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/data/processed'
 data_inds_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data_inds'
 lm_output_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs'
+scripts_path = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts'
+text_viz_path = os.path.join(scripts_path, 'text_viz')
+
 
 
 def get_dataset_size(data_dir = 'data/processed'):
@@ -154,3 +159,45 @@ def compute_correlations(xs, ys, corr_type='pearsonr'):
         return scipy.stats.spearmanr(xs, ys).statistic
     else:
         raise ValueError(f"Invalid corr_type={corr_type}")
+
+
+
+
+def convert_example_to_str(idx, example):
+    import json
+
+    metadata = {k: v for k, v in example.items() if k!='messages'}
+    messages = example['messages']
+    metadata['idx'] = idx
+    metadata['n_turns'] = len(messages)
+
+    s = ''
+    s += 'metadata: ' + json.dumps(metadata, indent=4) + '\n'
+    for message in messages:
+        s += '\n'
+        s += '='*15 + '\n'
+        s += f"= {message['role'].upper():11} =\n"
+        s += '='*15 + '\n'
+        s += message['content'] + '\n'
+    s += '\n'*15
+    
+    return s
+
+
+def write_ds_to_file_for_reading(dataset, num_examples, output_path):
+
+    output_dir = os.path.join(text_viz_path, os.path.dirname(output_path))
+    os.makedirs(output_dir, exist_ok=True)
+    full_path = os.path.join(output_dir, os.path.basename(output_path))
+
+    random.seed(0)
+    inds = random.sample(range(len(dataset)), num_examples)
+    inds = sorted(inds)
+
+    with open(full_path, 'w') as f:
+        for idx in inds:
+            example = dataset[idx]
+            s = convert_example_to_str(idx, example)
+            f.write(s)
+            
+    print(f'Writing {num_examples} examples to {full_path} completed!')
