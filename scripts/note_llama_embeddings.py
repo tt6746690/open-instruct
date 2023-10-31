@@ -99,7 +99,7 @@ def get_grad_statistic_pattern(model_name_or_path, use_lora):
             'loraB': r'lora_B\.[a-zA-Z_]+\.weight',
         }
     else:
-        if 'llama' in model_name_or_path:
+        if any(x in model_name_or_path.lower() for x in ['llama', 'mistral']):
             grad_statistic_patterns = {
                 'all': r'.*',
                 'qkv': r'(q_proj\.weight|k_proj\.weight|v_proj\.weight|o_proj\.weight)',
@@ -192,7 +192,10 @@ def gather_grad_embeddings(model, patterns, stacked=True):
             continue
         
         if stacked:
-            g = np.stack(g).reshape(-1)
+            # the resulting g has the correct ordering, i.e.,
+            # parameters associated with any weight matrix is grouped together.
+            g = [x.reshape(-1) for x in g]
+            g = np.hstack(g).reshape(-1)
         grad_embeddings[pattern_name] = g
         
     return grad_embeddings
