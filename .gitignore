@@ -6,6 +6,8 @@ results
 models
 wandb
 data/*
+scripts/text_viz/
+
 # !data/processed
 output/
 beaker_configs/auto_created

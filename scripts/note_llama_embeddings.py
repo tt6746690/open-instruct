@@ -380,7 +380,8 @@ def compute_lm_outputs(
         torch.manual_seed(0)
         torch.cuda.manual_seed(0)
         
-        if 'llama' in model_name_or_path:
+        if any(x in model_name_or_path.lower() for x in ['llama', 'mistral']):
+            # # the following also applies lora to MLP layers.
             # target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
             target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
         elif 'pythia' in model_name_or_path:
@@ -410,7 +411,7 @@ def compute_lm_outputs(
     print_trainable_parameters(model)
         
     if compute_grad:
-        if 'llama' in model_name_or_path:
+        if any(x in model_name_or_path.lower() for x in ['llama', 'mistral']):
             # Computing full gradient for llama or even lora's weight matrix is 
             # computationally prohibitive. Use gradient checkpointing to prevent oom issues.
             # Note gradient checkpointing is only applied when in training mode
