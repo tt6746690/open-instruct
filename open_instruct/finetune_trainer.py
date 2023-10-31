@@ -52,6 +52,49 @@ from peft import LoraConfig, TaskType, get_peft_model
 from transformers.trainer_utils import get_last_checkpoint
 from transformers import Trainer
 
+
+# ##### wpq: sub-class `get_train_dataloader` to add option to not shuffle the dataset
+
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from transformers.trainer_pt_utils import LengthGroupedSampler
+from transformers.trainer_utils import has_length
+from transformers.utils import is_datasets_available
+
+class MyTrainer(Trainer):
+
+    def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
+        if self.train_dataset is None or not has_length(self.train_dataset):
+            return None
+
+        # Build the sampler.
+        if self.args.group_by_length:
+            if is_datasets_available() and isinstance(self.train_dataset, datasets.Dataset):
+                lengths = (
+                    self.train_dataset[self.args.length_column_name]
+                    if self.args.length_column_name in self.train_dataset.column_names
+                    else None
+                )
+            else:
+                lengths = None
+            model_input_name = self.tokenizer.model_input_names[0] if self.tokenizer is not None else None
+            return LengthGroupedSampler(
+                self.args.train_batch_size * self.args.gradient_accumulation_steps,
+                dataset=self.train_dataset,
+                lengths=lengths,
+                model_input_name=model_input_name,
+            )
+
+        else:
+            # wpq: add option to change sampler to allow for non-shuffled ordering of data
+            if self.args.dataloader_sampler == 'RandomSampler':
+                return RandomSampler(self.train_dataset)
+            elif self.args.dataloader_sampler == 'SequentialSampler':
+                return SequentialSampler(self.train_dataset)
+            else:
+                raise ValueError(f'{self.args.dataloader_sampler} not supported.')
+        
+# #####
+
 # ##### wpq: avoid import error
 # # from safe_save_trainer import SafeSaveTrainer
 # import os
@@ -268,7 +311,6 @@ from transformers import Trainer
 # #####
 
 
-
 # wpq: having `open_instruct` not found error.
 # from open_instruct.finetune import encode_with_prompt_completion_format, encode_with_messages_format
 
@@ -480,6 +522,30 @@ class DataTrainingArguments:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
+
+
+# see https://github.com/huggingface/transformers/blob/main/src/transformers/training_args_seq2seq.py for more details
+@dataclass
+class TrainingArguments(transformers.training_args.TrainingArguments):
+
+    dataloader_sampler: Optional[str] = field(
+        default='RandomSampler',
+        metadata={"help": "Whether to shuffle the dataset."},
+    )
+
+    def to_dict(self):
+        """
+        Serializes this instance while replace `Enum` by their values and `GenerationConfig` by dictionaries (for JSON
+        serialization support). It obfuscates the token values by removing their value.
+        """
+        # filter out fields that are defined as field(init=False)
+        d = super().to_dict()
+        for k, v in d.items():
+            if isinstance(v, GenerationConfig):
+                d[k] = v.to_dict()
+        return d
+
+
 
 # wpq: decorate for debugging distributed runs.
 # @record
@@ -773,7 +839,7 @@ def main():
     # initalize a trainer
     # here we use a custom trainer that moves the model to CPU when saving the checkpoint in FSDP mode
     # we can switch to the default trainer after moving to deepspeed (let's don't change too much for now)
-    trainer = Trainer(
+    trainer = MyTrainer(
     # trainer = SafeSaveTrainer(
         model=model,
         args=training_args,
