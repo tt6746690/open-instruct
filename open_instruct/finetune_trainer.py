@@ -525,6 +525,8 @@ class DataTrainingArguments:
 
 
 # see https://github.com/huggingface/transformers/blob/main/src/transformers/training_args_seq2seq.py for more details
+from transformers import GenerationConfig
+
 @dataclass
 class TrainingArguments(transformers.training_args.TrainingArguments):
 
