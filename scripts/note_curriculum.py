@@ -1,274 +1,223 @@
 import os
 import re
-import pickle
-import json
 import random
-import time
+import pickle
+import glob
+import itertools
+
 import numpy as np
-import torch
 
 
-def save_to_pickle(save_path, output):
-    if 'inds' in output:
-        print(f'save inds (length = {len(output["inds"])}) to {save_path}')
-    with open(save_path, 'wb') as f:
-        pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+from note_pruning import save_to_pickle
+from note_pruning_analysis import curriculum_dir
 
 
-def save_sorted_inds(save_dir, S, sort_by, reverse=False, extra=None):
-    save_path = os.path.join(save_dir, f'{sort_by}_{"decr" if reverse else "incr"}.pkl')
-    inds = np.argsort(S).tolist()
-    if reverse:
-        inds = inds[::-1]
-    output = {'inds': inds, 'S': S[inds].tolist()}
-    if extra:
-        output.update(extra)
+
+def convert_existing_data_inds_to_curriculum_scores():
+    from note_pruning_analysis import get_sorted_inds
+
+    paths = glob.glob('data_inds/*/*/*.pkl')
+    paths = [x for x in paths if 'incr' in x and 'pythia' not in x]
+
+    for path in paths:
+
+        pkl_filename = os.path.basename(path)
+        sort_by = os.path.splitext(pkl_filename)[0]
+        dataset = os.path.basename(os.path.dirname(path))
+        model_name = os.path.basename(os.path.dirname(os.path.dirname(path)))
+        sorted_inds = get_sorted_inds(dataset, model_name, sort_by)
+        sorted_inds = {k: np.array(v) if v else None for k, v in sorted_inds.items()}
+        if 'S' in sorted_inds and 'inds' in sorted_inds:
+            sorted_inds['S'] = sorted_inds['S'][np.argsort(sorted_inds['inds'])]
+        S = sorted_inds['S']
+
+        ## use `note_pruning` to generate scores for curriculum learning.
+        sort_by = sort_by.split('_incr')[0]
+        for pacing_fn in [sort_by, sort_by+'_neg']:
+            curriculum_output_dir = os.path.join('curriculum', model_name, dataset, pacing_fn)
+            print(curriculum_output_dir)
+            os.makedirs(curriculum_output_dir, exist_ok=True)
+            save_path = os.path.join(curriculum_output_dir, 'scores.pkl')
+            output = {'S': -S if pacing_fn.endswith('_neg') else S}
+            save_to_pickle(save_path=save_path, output=output)
+
+    
+def np_random_choice_maximize_noreplacement(L, n):
+    """Sample `L` without replacement `n` samples.
+        if `n>len(L)`, then sample without replacement as much as possible, and
+            accumulate the resulting samples until the entire `n` is sampled
+    """
+    S = []
+    while n>0:
+        l = np.random.choice(L, size=min(n, len(L)), replace=False)
+        n -= l.size
+        S.append(l)
+    S = np.hstack(S)
+    return S
+
+
+def scores_path_to_attrs(path):
+    """Convert `scores.pkl` path to factors that generated the scores."""
+    pkl_filename = os.path.basename(path)
+    scoring_fn = os.path.basename(os.path.dirname(path))
+    dataset = os.path.basename(os.path.dirname(os.path.dirname(path)))
+    model_name = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(path))))
+    output = {
+        'model_name': model_name, 
+        'dataset': dataset, 
+        'scoring_fn': scoring_fn,
+    }
+    return output
+
+
+def get_curriculum_scores(path):
+    """The scores are pre-computed via `note_pruning.py`. """
+    output = scores_path_to_attrs(path)
+    with open(path, 'rb') as f:
+        scores = pickle.load(f)['S']
+    output.update({'scores': scores})
+    return output
+
+
+def get_curriculum(model_name, dataset, scoring_fn, pacing_fn):
+    """Get a curriculum that contains both `scores` and `inds`
+        once the curriculum is generated.
+
+        ```
+        from note_curriculum import get_curriculum
+        get_curriculum('llama-7b+lora:r=256:a=256', 
+                       'tulu_v1_mix', 
+                       'log_prob_neg', 
+                       'prune_size=150000_ep=3')
+        ```
+    
+    """
+    path = os.path.join(curriculum_dir, model_name, dataset, scoring_fn, 'inds_'+pacing_fn+'.pkl')
+    with open(path, 'rb') as f:
+        output = pickle.load(f)
+    for k, v in [('dataset', dataset), ('model_name', model_name), ('scoring_fn', scoring_fn)]:
+        assert(output[k] == v)
+    for k in ['scores', 'inds']:
+        output[k] = output.pop(k)
+    return output
+
+
+def generate_curriculum(path, pacing_fn, verbose=False):
+    """Generate a data ordering for curriculum learning given 
+        `path` to scores of each data point and a pacing function.
+    """
+
+    output = get_curriculum_scores(path)
+    output['pacing_fn'] = pacing_fn
+
+    scores = output['scores']
+    N = scores.size
+    inds_sorted = np.argsort(scores).tolist() # increasing `scores`.
+    match = re.search(r'_s=([^_]+)', pacing_fn)
+    seed = int(match.group(1)) if match else 0
+
+    np.random.seed(seed)
+
+    if pacing_fn.startswith('prune'):
+
+        match = re.search(r'size=([^_]+)', pacing_fn)
+        M = int(match.group(1)) # total data points over `num_epochs` epochs.
+        match = re.search(r'ep=([^_]+)', pacing_fn)
+        num_epochs = int(match.group(1))
+
+        if M >= len(inds_sorted):
+            raise ValueError(f'size={M} > len(inds)={len(inds_sorted)}')
+
+        sizes = []
+        for _ in range(num_epochs-1):
+            sizes.append(int(M//num_epochs))
+        sizes.append(int(M-np.sum(sizes)))
+            
+        inds = []
+        for size in sizes:
+            inds_kept = list(inds_sorted[:size])
+            np.random.shuffle(inds_kept)
+            inds.append(inds_kept)
+        inds = [x for sl in inds for x in sl]
+        inds = np.array(inds)
+
+        if len(inds) != M:
+            raise ValueError('len(inds) should be equal to size')
+    elif pacing_fn.startswith('singlestep'):
+
+        match = re.search(r'size=([^_]+)', pacing_fn)
+        M = int(match.group(1))
+        match = re.search(r'startingfrac=([\d.]+)', pacing_fn)
+        startingfrac = float(match.group(1))
+
+        inds_step1 = list(inds_sorted[:int(startingfrac*N)])
+        inds_step1_size = int(M//2)
+        if verbose:
+            print(f'Step 1: sample {inds_step1_size} from first {len(inds_step1)} examples.')
+        inds_step1 = np_random_choice_maximize_noreplacement(inds_step1, inds_step1_size)
+
+        inds_step2 = list(inds_sorted)
+        inds_step2_size = M-inds_step1_size
+        if verbose:
+            print(f'Step 2: sample {inds_step2_size} from the rest of {len(inds_step2)} examples.')
+        inds_step2 = np_random_choice_maximize_noreplacement(inds_step2, inds_step2_size)
+
+        inds = [inds_step1, inds_step2]
+        inds = np.hstack([x.reshape(-1) for x in inds])
+        
+        if len(inds) != M:
+            raise ValueError('len(inds) should be equal to size')
+    else:
+        raise ValueError(f'{pacing_fn} not implemented.')
+
+    output['inds'] = inds
+    save_path = os.path.join(os.path.dirname(path), 'inds_'+pacing_fn+'.pkl')
     save_to_pickle(save_path, output)
 
-    
-def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_kmeans', dist_fn='l2'):
-    """
-        dist_fn
-            l2: euclidean distance
-            cd: cosine distance
-    """
-    from sklearn.cluster import KMeans, MiniBatchKMeans
+    return output
 
-    if dist_fn not in ['l2', 'cd']:
-        raise ValueError(f'Invalid dist_fn={dist_fn}')
 
-    if kmeans_type == 'auto':
-        kmeans_type = 'kmeans' if len(X) <= 100000 else 'minibatch_kmeans'
-    if kmeans_type == 'minibatch_kmeans':
-        kmeans_cls = MiniBatchKMeans
-        # need to increase the batch size! otherwise makes no progress and stops early.
-        # https://stackoverflow.com/questions/21447351/minibatchkmeans-parameters
-        # - might want to decrease reassignment_ratio for low n_clusters.
-        kmeans_fn_kwargs = {'batch_size': 512, 
-                            'max_no_improvement': 100,
-                            'reassignment_ratio': 1e-4,}
-        print(kmeans_fn_kwargs)
-    elif kmeans_type == 'kmeans':
-        kmeans_cls = KMeans
-        kmeans_fn_kwargs = {}
-    else:
-        raise ValueError(f'Invalid kmeans_type={kmeans_type}')
+def generate_curriculum_forall_scoring_fn(
+        model_name_list, 
+        dataset_list, 
+        pacing_fn_list, 
+        verbose=False
+    ):
+    import pandas as pd
+    if not isinstance(model_name_list, list):
+        model_name_list = [model_name_list]
+    if not isinstance(pacing_fn_list, list):
+        pacing_fn_list = [pacing_fn_list]
+    if not isinstance(dataset_list, list):
+        dataset_list = [dataset_list]
         
-    X = X.astype(np.float64)
-    kmeans = kmeans_cls(
-        n_clusters=n_clusters, 
-        init='k-means++',
-        random_state=0,
-        n_init=10,
-        verbose=True,
-        **kmeans_fn_kwargs)
-
-    if dist_fn == 'cd':
-        X = X / np.linalg.norm(X, axis=1, ord=2)[:, np.newaxis]
-    kmeans.fit(X)
-    P = kmeans.cluster_centers_[kmeans.labels_]
-    if dist_fn == 'cd':
-        P = P / np.linalg.norm(P, axis=1, ord=2)[:, np.newaxis]
-        D = 1 - np.sum(X*P, axis=1) # cosine distance!
-    else:
-        D = np.linalg.norm(X - P, axis=1)
-    
-    return D, kmeans
-
-
-def cholesky_jitter(K, jitter=1e-5):
-    K[np.diag_indices_from(K)] += jitter
-    return K
-
-
-def sort_dpp_map(X, logP, kernel_type='Kcos'):
-    import sys
-    sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
-    from dpp import dpp
-    
-    logP = torch.from_numpy(logP).to('cuda')
-    P = logP.exp().to('cpu')
-    
-    N = P.shape[0]
-    
-    X = torch.from_numpy(X).to('cuda')
-    X = torch.nn.functional.normalize(X, dim=-1)
-    # S = T@T.T out-of-memory
-    # use block-wise matmul to reduce peak memory usage.
-    L = []
-    for Xn in torch.split(X, 3000):
-        L.append((Xn@X.T).to('cpu'))
-    S = torch.vstack(L)
-    
-    if kernel_type == 'Kcos':
-        K = S
-    elif kernel_type == 'Kcosp':
-        K = P.reshape(N,1)*S*P.reshape(1,N)
-    elif kernel_type == 'Kcos1np':
-        K = (1-P).reshape(N,1)*S*(1-P).reshape(1,N)
-    else:
-        raise ValueError(f'Invalid kernel_type={kernel_type}')
-        
-    K = K.numpy()
-    K = cholesky_jitter(K, jitter=1e-3)
-
-    inds = dpp(K, N)
-    if len(inds) != N:
-        print(f'dpp map len(indices)={len(inds)} != {N} = N')
-        
-    return inds 
-
-
-def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos', torch_compile=False):
-    """O(N) memory instead of O(N^2) memory, due to lazily evalute kernel matrix."""
-    import sys
-    sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
-    from dpp import dpp_lazy
-
-    logP = torch.from_numpy(logP).to('cuda')
-    P = logP.exp()
-
-    N = P.shape[0]
-
-    if torch_compile:
-        X = X / np.linalg.norm(X, axis=-1, ord=2, keepdims=True)
-    else:
-        X = torch.from_numpy(X).to('cuda')
-        X = torch.nn.functional.normalize(X, dim=-1)
-
-    jitter = 1e-3
-
-    def kernel_matrix_ith_row(i):
-        """Returns i-th row of kernel matrix `K`"""
-        if kernel_type == 'Kcos':
-            Ki = X[i]@X.T
-        elif kernel_type == 'Kcosp':
-            Ki = P[i]*X[i]@X.T*P.reshape(1,N)
-        elif kernel_type == 'Kcos1np':
-            Ki = (1-P[i])*X[i]@X.T*(1-P.reshape(1,N))
-        else:
-            raise ValueError(f'kernel_type={kernel_type} not supported')
-        Ki = Ki.squeeze()
-        Ki[i] += jitter
-        if torch_compile:
-            return Ki
-        else:
-            return Ki.to('cpu').numpy()
-
-    def kernel_matrix_diag():
-        if kernel_type == 'Kcos':
-            Kdiag = (X*X).sum(-1)
-        elif kernel_type == 'Kcosp':
-            Kdiag = (X*X).sum(-1) * (P*P)
-        elif kernel_type == 'Kcos1np':
-            Kdiag = (X*X).sum(-1) * ((1-P)*(1-P))
-        else:
-            raise ValueError(f'kernel_type={kernel_type} not supported')
-        Kdiag = Kdiag.squeeze()
-        Kdiag += jitter
-        if torch_compile:
-            return Kdiag
-        else:
-            return Kdiag.to('cpu').numpy()
-         
-    max_length = min(50000, int(.3*N))
-    if torch_compile:
-        dpp_lazy = torch.compile(dpp_lazy)
-        kernel_matrix_ith_row = torch.compile(kernel_matrix_ith_row)
-        kernel_matrix_diag = torch.compile(kernel_matrix_diag)
-    inds = dpp_lazy(N, kernel_matrix_ith_row, kernel_matrix_diag, max_length, jitter)
-    if len(inds) != N:
-        print(f'dpp map len(indices)={len(inds)} != {N} = N')
-    
-    return inds
-
-
-def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
-
-    save_path = os.path.join(lm_output_dir, f'{dataset}.pkl')
-    with open(save_path, 'rb') as f:
-        d = pickle.load(f)
-    if test_run:
-        d = {k: v[:1000] for k, v in d.items()}
-        
-    # some entries are nan, impute with mean value.
-    N = d['text_embedding'].shape[0]
-    log_prob = np.nan_to_num(d['log_prob'], nan=np.nanmean(d['log_prob'])).squeeze()
-
-    pkl_extra = {}
-
-    t0 = time.time()
-    if any(sort_by.startswith(x) for x in [
-            'log_prob', 
-            'el2n',  # el2n_agg={l2n|mean}
-            'logit_margin', 
-            'grad',  # grad_{loraB|qkv|all|last}_l2n
-        ]):
-        if sort_by not in d:
-            print(f'sort_by={sort_by} not in lm_output_dir={lm_output_dir}')
-            return
-        S = np.nan_to_num(d[sort_by], nan=np.nanmean(d[sort_by])).squeeze()
-    elif sort_by.startswith('random'):
-        match = re.search(r's=(\d+)', sort_by)
-        seed = int(match.group(1))
-        random.seed(seed)
-        inds = list(range(N))
-        random.shuffle(inds)
-    if sort_by.startswith('kmeans'):
-        dist_fn = 'l2' if sort_by.startswith('kmeansl2') else 'cd'
-        match = re.search(r'nc=(\d+)', sort_by)
-        n_clusters = int(match.group(1)) if match else None
-        match = re.search(r'emb=([^_]+)', sort_by)
-        embed_type = re.sub(r'[+]', '_', match.group(1)) if match else 'text_embedding'
-        if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
-            raise ValueError(f'Invalid embed_type = {embed_type}')
-        emb = d[embed_type]
-        print(f'Running kmeans(n_clusters={n_clusters}) {{ {embed_type} }} to compute {"euclidean" if dist_fn == "l2" else "cosine"} distance to cluster centers.')
-        S, kms = sort_kmeans_dist_to_cluster_centers(emb, n_clusters, dist_fn=dist_fn)
-        pkl_extra['kmeans'] = kms
-    elif sort_by.startswith('dpp'):
-        match = re.search(r'k=(\w+)', sort_by)
-        kernel_type = match.group(1) if match else None
-        match = re.search(r'emb=([^_]+)', sort_by)
-        embed_type = re.sub(r'[+]', '_', match.group(1)) if match else 'text_embedding'
-        if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
-            raise ValueError(f'Invalid embed_type = {embed_type}')
-        emb = d[embed_type]
-        inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
-
-    t1 = time.time()
-    print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
-
-    if any(sort_by.startswith(x) for x in ['dpp', 'random']):
-        output = {'inds': inds}
-        if pkl_extra:
-            output.update(pkl_extra)
-        save_to_pickle(
-            save_path=os.path.join(save_dir, f'{sort_by}.pkl'),
-            output=output)
-    else:
-        save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=False)
-        save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=True)
-
+    paths = glob.glob('curriculum/*/*/*/scores.pkl')
+    paths = [x for x in paths if \
+                any(y in x for y in model_name_list) and \
+                any(y in x for y in dataset_list)]
+    data = [scores_path_to_attrs(path) for path in paths]
+    df = pd.DataFrame(data)
+    if verbose and jpt_in_notebook():
+        from IPython.display import display
+        display(df)
+    output_list = []
+    for path, pacing_fn in itertools.product(paths, pacing_fn_list):
+        output = generate_curriculum(path, pacing_fn, verbose=verbose)
+        output_list.append(output)
+    return output_list
 
 
 if __name__ == '__main__':
-    """
-    python note_explore_data_pruning.py --dataset lima --sort_by prob --test_run
-    """
 
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, default="lima")
-    parser.add_argument("--sort_by", type=str, default="prob")
-    parser.add_argument("--lm_output_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs/llama-7b")
-    parser.add_argument("--save_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data_inds/llama-7b/")
-    parser.add_argument("--test_run", action='store_true', default=False)
-    args = parser.parse_args()
+    model_name = 'llama-7b'; dataset = 'tulu_v1_mix'; M = 150_000
+    # model_name = 'mistral-7b'; dataset = 'ultrachat'; M =  50_000
 
-    print(json.dumps(vars(args), indent=2))
+    pacing_fn_list = [
+        f'prune_size={M}_ep=1', # for `scoring_fn=random` baselines
+        f'prune_size={M}_ep=3',
+        f'singlestep_size={M}_startingfrac=0.2',
+        f'singlestep_size={M}_startingfrac=0.1',
+    ]
 
-    args.save_dir = os.path.join(args.save_dir, args.dataset)
-    os.makedirs(args.save_dir, exist_ok=True)
-
-    prune_data(**vars(args))
+    output_list = generate_curriculum_forall_scoring_fn(
+        model_name, dataset, pacing_fn_list, verbose=False)

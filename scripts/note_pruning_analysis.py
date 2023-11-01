@@ -23,13 +23,15 @@ from transformers import AutoTokenizer
 from datasets import load_dataset
 
 
+open_instruct_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/'
 assets_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/assets/'
-data_raw_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/data/raw_train'
-processed_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/data/processed'
-data_inds_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data_inds'
-lm_output_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs'
-scripts_path = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts'
-text_viz_path = os.path.join(scripts_path, 'text_viz')
+scripts_dir = os.path.join(open_instruct_dir, 'scripts')
+data_raw_dir = os.path.join(open_instruct_dir, 'data', 'raw_train')
+processed_dir = os.path.join(open_instruct_dir, 'data', 'processed')
+data_inds_dir = os.path.join(scripts_dir, 'data_inds')
+lm_output_dir = os.path.join(scripts_dir, 'model_outputs')
+text_viz_path = os.path.join(scripts_dir, 'text_viz')
+curriculum_dir = os.path.join(scripts_dir, 'curriculum')
 
 
 
@@ -83,7 +85,11 @@ def get_dataset(dataset, processed=True):
             train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.jsonl')
         else:
             train_file = os.path.join(data_raw_dir, dataset)
-    ds = load_dataset('json', data_files={'train': train_file}, split='train', cache_dir=os.path.dirname(train_file))
+    ds = load_dataset(
+        'json', 
+        data_files={'train': train_file}, 
+        split='train', 
+        cache_dir=os.path.dirname(train_file))
     return ds
 
 
@@ -149,6 +155,7 @@ def get_prune_results(path):
     return output
 
 
+
 def compute_correlations(xs, ys, corr_type='pearsonr'):
     xs = xs.squeeze()
     ys = ys.squeeze()
@@ -159,8 +166,6 @@ def compute_correlations(xs, ys, corr_type='pearsonr'):
         return scipy.stats.spearmanr(xs, ys).statistic
     else:
         raise ValueError(f"Invalid corr_type={corr_type}")
-
-
 
 
 def convert_example_to_str(idx, example):
