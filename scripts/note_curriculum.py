@@ -211,9 +211,9 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     elif sort_by.startswith('random'):
         match = re.search(r's=(\d+)', sort_by)
         seed = int(match.group(1))
-        np.random.seed(seed)
-        S = np.random.rand(N)
-        assert(S.shape == np.unique(S).shape)
+        random.seed(seed)
+        inds = list(range(N))
+        random.shuffle(inds)
     if sort_by.startswith('kmeans'):
         dist_fn = 'l2' if sort_by.startswith('kmeansl2') else 'cd'
         match = re.search(r'nc=(\d+)', sort_by)
@@ -239,7 +239,7 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     t1 = time.time()
     print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
 
-    if any(sort_by.startswith(x) for x in ['dpp']):
+    if any(sort_by.startswith(x) for x in ['dpp', 'random']):
         output = {'inds': inds}
         if pkl_extra:
             output.update(pkl_extra)
@@ -249,16 +249,6 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
     else:
         save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=False)
         save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=True)
-
-        ## use `note_pruning` to generate scores for curriculum learning.
-        model_name = os.path.basename(lm_output_dir)
-        for pacing_fn in [sort_by, sort_by+'_neg']:
-            curriculum_output_dir = os.path.join('curriculum', model_name, dataset, pacing_fn)
-            os.makedirs(curriculum_output_dir, exist_ok=True)
-            save_path = os.path.join(curriculum_output_dir, 'scores.pkl')
-            output = {'S': -S if pacing_fn.endswith('_neg') else S}
-            save_to_pickle(save_path=save_path, output=output)
-
 
 
 
