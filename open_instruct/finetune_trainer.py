@@ -684,6 +684,9 @@ def main():
             "You are instantiating a new tokenizer from scratch. This is not supported by this finetuning script."
         )
 
+    if isinstance(tokenizer, LlamaTokenizerFast):
+        raise ValueError('LlamaTokenizerFast cannot encode eos token </s> properly in transformres v4.35.0. See https://github.com/huggingface/transformers/issues/23833 for more details.')
+
     if model_args.model_name_or_path:
         torch_dtype = (
             model_args.torch_dtype
@@ -715,7 +718,7 @@ def main():
     # here we add all special tokens again, because the default ones are not in the special_tokens_map 
     if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
         num_added_tokens = tokenizer.add_special_tokens({
-            # llama tokenizer already has bos/eos/unk added. transformers v4.34.0 returns `num_added_tokens=4` even if only the pad token is added. So just add the pad token here to pass the assertion.
+            # llama tokenizer already has bos/eos/unk added. transformers v4.35.0 returns `num_added_tokens=4` even if only the pad token is added. So just add the pad token here to pass the assertion.
             # "bos_token": "<s>",
             # "eos_token": "</s>",
             # "unk_token": "<unk>",
