@@ -77,7 +77,6 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
                 # we need to re-encode the prompt because we need to make sure the special tokens are treated the same way as in the outputs.
                 # we changed our previous way of truncating the output token ids dicrectly because some tokenizer (e.g., llama) won't add space token before the first token.
                 # space is important for some tasks (e.g., code completion).
-                print(batch_outputs)
                 batch_outputs = tokenizer.batch_decode(batch_outputs, skip_special_tokens=True)
                 batch_prompts = tokenizer.batch_decode(batch_input_ids, skip_special_tokens=True)
                 # duplicate the prompts to match the number of return sequences

@@ -57,6 +57,7 @@ def main(args):
                 load_in_8bit=args.load_in_8bit,
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
+                use_fast_tokenizer=not args.use_slow_tokenizer,
             )
             outputs = generate_completions( 
                 model=model,
@@ -123,6 +124,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="results/alpaca_farm")
     parser.add_argument("--model_name_or_path", type=str, default=None, help="If specified, we will load the model to generate the predictions.")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="If specified, we will load the tokenizer from here.")
+    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.")
     parser.add_argument("--openai_engine", type=str, default=None, help="If specified, we will use the OpenAI API to generate the predictions.")
     parser.add_argument("--eval_batch_size", type=int, default=1, help="Batch size for evaluation.")
     parser.add_argument("--load_in_8bit", action="store_true", help="Load model in 8bit mode, which will reduce memory and speed up inference.")
