@@ -90,10 +90,27 @@ def filter_invalid_roles(content):
 
 
 def main(args):
-    content = []
-    for file in args.in_files:
-        content.extend(json.load(open(file)))
-
+    if args.in_files == ['HuggingFaceH4/ultrachat_200k']:
+        data_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data/raw_train/ultrachat'
+        from datasets import load_dataset
+        ds = load_dataset('HuggingFaceH4/ultrachat_200k', cache_dir=data_dir, split='train_sft')
+        ## wpq: convert the formatting to use the split conversation code.
+        def convert_message_to_sharegpt_chat_format(m):
+            return {'from': 'gpt' if m['role']=='assistant' else 'human',
+                    'value': m['content']}
+        def convert_conversations_to_sharegpt_chat_format(conv):
+            return [convert_message_to_sharegpt_chat_format(m) for m in conv]
+        prompt_id = ds['prompt_id']
+        conversations = ds['messages']
+        conversations = [convert_conversations_to_sharegpt_chat_format(x)
+                        for x in conversations]
+        assert(len(conversations)==len(prompt_id))
+        content = [{'id': pid, 'conversations': conv} for pid, conv in zip(prompt_id, conversations)]
+    else:
+        content = []
+        for file in args.in_files:
+            with open(file, 'rb') as f:
+                content.extend(json.load(f))
 
     # wpq: enable `use_fast` for mosaicml/mpt-7 since only fast tokenizer is implemented.
     use_fast = 'mpt' in args.model_name_or_path
@@ -105,6 +122,17 @@ def main(args):
     print(f"after split:  {len(new_content)}")
     new_content = filter_invalid_roles(new_content)
     print(f"after filter: {len(new_content)}")
+
+    if args.in_files == ['HuggingFaceH4/ultrachat_200k']:
+        ## wpq: convert back to ultrachat format
+        def convert_messages_to_ultrachat_format(m):
+            return {'content': m['value'], 
+                    'role': 'user' if m['from']=='human' else 'assistant'}
+        def convert_conversations_to_ultrachat_format(conv):
+            return [convert_messages_to_ultrachat_format(m) for m in conv] 
+        new_content = [{'prompt_id': x['id'], 
+        'conversations': convert_conversations_to_ultrachat_format(x['conversations'])} 
+            for x in new_content]
 
     print(f"total: {len(content)}, new: {len(new_content)}")
     json.dump(new_content, open(args.out_file, "w"), indent=2)
