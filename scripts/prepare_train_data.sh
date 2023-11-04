@@ -60,6 +60,7 @@ wget -P data/raw_train/baize/ https://github.com/project-baize/baize-chatbot/raw
 
 
 echo "Downloading ShareGPT dataset..."
+# 76920 conversations in total.
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part1_html_cleaned.json
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part2_html_cleaned.json
 echo "Splitting the ShareGPT dataset..."
