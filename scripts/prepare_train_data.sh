@@ -102,8 +102,17 @@ wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/Open
 # # reformat flan2022 mixture data resampled 1m
 # python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset flan2022
 #
+## Use pre-downloaded huggingface's dataset and split long ultrachat conversations
+python scripts/split_sharegpt_conversations.py \
+    --in-files HuggingFaceH4/ultrachat_200k \
+    --out-file data/raw_train/ultrachat/ultrachat_200k_splitlongconv.json \
+    --model-name-or-path results/baselines/huggyllama/llama-7b \
+    --max-length 2048
+
 # # reformat ultrachat 200k
 # python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset ultrachat
+
+
 
 
 echo "Reformatting the datasets..."
