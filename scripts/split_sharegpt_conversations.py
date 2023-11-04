@@ -138,6 +138,15 @@ def main(args):
     json.dump(new_content, open(args.out_file, "w"), indent=2)
 
 
+    ## wpq: more logging.
+    from collections import Counter
+    print('conversation lengths:')
+    nconv = [len(x['conversations']) for x in content]
+    print('before split: ', dict(Counter(nconv)))
+    nconv = [len(x['conversations']) for x in new_content]
+    print('after split: ', dict(Counter(nconv)))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--in-files", nargs="+", type=str)
