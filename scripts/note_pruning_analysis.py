@@ -38,6 +38,7 @@ curriculum_dir = os.path.join(scripts_dir, 'curriculum')
 def get_dataset_size(data_dir = 'data/processed'):
     """
         ```
+        from note_pruning_analysis import get_dataset_size
         df = get_dataset_size()
         markdown_table = df.to_markdown(index=False)
         print(markdown_table)
