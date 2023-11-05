@@ -561,16 +561,18 @@ def convert_ultrachat_data(data_dir, output_dir):
     output_path = os.path.join(output_dir, 'ultrachat_data.jsonl')
     # ds = load_dataset('HuggingFaceH4/ultrachat_200k', cache_dir=data_dir, split='train_sft')
     ds = load_dataset('json', data_files={'train': os.path.join(data_dir, 'ultrachat_200k_splitlongconv.json')}, split='train', cache_dir=data_dir, keep_in_memory=True)
+    # splitting conversations removes "prompt" already.
+    ds = ds.remove_columns(["prompt_id"])
     def add_metadata_fn(example, idx):
         example.update({'dataset': 'ultrachat', 'id': f'ultrachat_{idx}'})
         return example
     ds = ds.map(add_metadata_fn, 
-                remove_columns=['prompt_id'], # splitting conversations removes "prompt" already.
                 with_indices=True, 
                 num_proc=10,
                 keep_in_memory=True)
+    # re-ordering the features
+    ds =  ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
     ds.to_json(output_path)
-
 
 
 def get_all_supported_datasets():   
