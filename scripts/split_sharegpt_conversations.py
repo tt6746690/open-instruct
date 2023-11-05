@@ -131,7 +131,7 @@ def main(args):
         def convert_conversations_to_ultrachat_format(conv):
             return [convert_messages_to_ultrachat_format(m) for m in conv] 
         new_content = [{'prompt_id': x['id'], 
-        'conversations': convert_conversations_to_ultrachat_format(x['conversations'])} 
+                        'messages': convert_conversations_to_ultrachat_format(x['conversations'])} 
             for x in new_content]
 
     print(f"total: {len(content)}, new: {len(new_content)}")
@@ -143,7 +143,7 @@ def main(args):
     print('conversation lengths:')
     nconv = [len(x['conversations']) for x in content]
     print('before split: ', dict(Counter(nconv)))
-    nconv = [len(x['conversations']) for x in new_content]
+    nconv = [len(x['messages']) for x in new_content]
     print('after split: ', dict(Counter(nconv)))
 
 
