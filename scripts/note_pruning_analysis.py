@@ -190,20 +190,76 @@ def convert_example_to_str(idx, example):
     return s
 
 
-def write_ds_to_file_for_reading(dataset, num_examples, output_path):
+def write_ds_to_file_for_reading(dataset, output_path, num_examples=None):
 
-    output_dir = os.path.join(text_viz_path, os.path.dirname(output_path))
-    os.makedirs(output_dir, exist_ok=True)
-    full_path = os.path.join(output_dir, os.path.basename(output_path))
+    # output_dir = os.path.join(text_viz_path, os.path.dirname(output_path))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    # full_path = os.path.join(output_dir, os.path.basename(output_path))
+
+    if num_examples is None:
+        num_examples = len(dataset)
 
     random.seed(0)
     inds = random.sample(range(len(dataset)), num_examples)
     inds = sorted(inds)
 
-    with open(full_path, 'w') as f:
+    with open(output_path, 'w') as f:
         for idx in inds:
             example = dataset[idx]
             s = convert_example_to_str(idx, example)
             f.write(s)
             
-    print(f'Writing {num_examples} examples to {full_path} completed!')
+    print(f'Writing {num_examples} examples to {output_path} completed!')
+
+
+
+def sample_indices_given_scores(scores, portion):
+    """Given `scores`, sample indices from corresponding regions of indices
+        indicated by `portion`.
+        Used to generate a few examples for text visualization.
+        """
+    np.random.seed(0)
+
+    match = re.search(r'num=([^_]+)', portion)
+    num_printed = int(match.group(1))
+
+    if portion.startswith('sorted'):
+        inds_sorted = np.argsort(scores)
+        inds_to_inds = np.arange(len(scores))
+
+        if portion.startswith(('sorted_beg', 'sorted_end')):
+            if portion.startswith('sorted_end'):
+                inds_to_inds = inds_to_inds[::-1]
+            inds_to_inds = inds_to_inds[:num_printed]
+        elif portion.startswith('sorted_partition'):
+            match = re.search(r'partition=([\d.:]+)', portion)
+            part, npart = match.group(1).split(':')
+            part, npart = int(part)-1, int(npart) # make 1 ordered, e.g., 1:10, ..., 10:10
+            def split_section_sizes(n, sections):
+                """Get size of sections for an array of size `n` into `sections` sections. """
+                L = []
+                for _ in range(sections-1):
+                    L.append(int(n//sections))
+                L.append(int(n-np.sum(L)))
+                return L
+            indices_or_sections = np.cumsum(split_section_sizes(len(inds_to_inds), npart)[:-1])
+            inds_to_inds_split = np.split(inds_to_inds, indices_or_sections)
+            assert(len(inds_to_inds_split) == npart)
+            assert(np.sum([x.shape[0] for x in inds_to_inds_split]) == len(inds_to_inds))
+            inds_to_inds = inds_to_inds_split[part]
+
+            inds_to_inds = np.random.choice(
+                inds_to_inds, min(num_printed, len(inds_to_inds)), replace=False)
+            inds_to_inds = np.sort(inds_to_inds)
+        elif portion.startswith('sorted_random'):
+            inds_to_inds = np.random.choice(
+                inds_to_inds, min(num_printed, len(inds_to_inds)), replace=False)
+        else:
+            raise ValueError(f'portion={portion} not supported')
+
+        inds_to_inds = np.sort(inds_to_inds)    
+        inds = inds_sorted[inds_to_inds]
+    else:
+        raise ValueError(f'portion={portion} not supported')
+        
+    return inds
