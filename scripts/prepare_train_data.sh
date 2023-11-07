@@ -84,6 +84,24 @@ wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/Open
 wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/OpenOrca/resolve/main/3_5M-GPT3_5-Augmented.parquet
 
 
+echo "Downloading the UltraChat dataset..."
+# wget -P data/raw_train/ultrachat https://cloud.tsinghua.edu.cn/f/0a27393192ad46a5a081/?dl=1
+# wget -P data/raw_train/ultrachat https://cloud.tsinghua.edu.cn/f/57258a87846243218a9b/?dl=1
+# wget -P data/raw_train/ultrachat https://cloud.tsinghua.edu.cn/f/099b4dd71b82448fb7fb/?dl=1
+# wget -P data/raw_train/ultrachat https://cloud.tsinghua.edu.cn/f/1f7abdf2d2564cb4b338/?dl=1
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_0.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_1.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_2.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_3.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_4.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_5.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_6.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_7.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_8.jsonl
+wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_9.jsonl
+
+
+
 # ## flan v2 full dataset processing
 # 
 # # download full flan_v2 dataset with snap_download

@@ -7,6 +7,7 @@ import time
 import numpy as np
 import torch
 
+from note_pruning_analysis import lm_output_dir
 
 def save_to_pickle(save_path, output):
     if 'inds' in output:
@@ -183,19 +184,42 @@ def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos', torch_compile=False):
     return inds
 
 
-def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
+def save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, dataset):
+    
+    if any(sort_by.startswith(x) for x in ['dpp']):
+        output = {'inds': inds}
+        if pkl_extra:
+            output.update(pkl_extra)
+        save_to_pickle(
+            save_path=os.path.join(save_dir, f'{sort_by}.pkl'),
+            output=output)
+    else:
+        save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=False)
+        save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=True)
 
-    save_path = os.path.join(lm_output_dir, f'{dataset}.pkl')
-    with open(save_path, 'rb') as f:
-        d = pickle.load(f)
+        ## use `note_pruning` to generate scores for curriculum learning.
+        for pacing_fn in [sort_by, sort_by+'_neg']:
+            curriculum_output_dir = os.path.join('curriculum', model_name, dataset, pacing_fn)
+            os.makedirs(curriculum_output_dir, exist_ok=True)
+            save_path = os.path.join(curriculum_output_dir, 'scores.pkl')
+            output = {'S': -S if pacing_fn.endswith('_neg') else S}
+            save_to_pickle(save_path=save_path, output=output)
+
+
+def prune_data(dataset, sort_by, save_dir, model_name, test_run):
+
+    from note_pruning_analysis import get_lm_output
+
+    d = get_lm_output(dataset, model_name, return_text_embedding=True)
     if test_run:
         d = {k: v[:1000] for k, v in d.items()}
         
     # some entries are nan, impute with mean value.
     N = d['text_embedding'].shape[0]
-    log_prob = np.nan_to_num(d['log_prob'], nan=np.nanmean(d['log_prob'])).squeeze()
+    log_prob = d['log_prob']
 
     pkl_extra = {}
+    inds = None
 
     t0 = time.time()
     if any(sort_by.startswith(x) for x in [
@@ -205,7 +229,7 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
             'grad',  # grad_{loraB|qkv|all|last}_l2n
         ]):
         if sort_by not in d:
-            print(f'sort_by={sort_by} not in lm_output_dir={lm_output_dir}')
+            print(f'sort_by={sort_by} not in model output: ({dataset}, {model_name})')
             return
         S = np.nan_to_num(d[sort_by], nan=np.nanmean(d[sort_by])).squeeze()
     elif sort_by.startswith('random'):
@@ -235,30 +259,28 @@ def prune_data(dataset, sort_by, save_dir, lm_output_dir, test_run):
             raise ValueError(f'Invalid embed_type = {embed_type}')
         emb = d[embed_type]
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
+    elif sort_by.startswith('rho'):
+        model_names = [x.strip() for x in model_name.split('__rho__')]
+        assert(len(model_names) == 2)
+        ds = []
+        for x in model_names:
+            ds.append(get_lm_output(dataset, x, return_text_embedding=False, fill_nan=False))
+        ks = [set(d.keys()) for d in ds]
+        ks = ks[0] & ks[1]
+        for k in ks:
+            S0 = ds[0][k]
+            S1 = ds[1][k]
+            # handle nan entries properly.
+            nan_mask = np.logical_or(np.isnan(S0), np.isnan(S1))
+            S = np.subtract(S0, S1)
+            S[nan_mask] = np.nan
+            save_prune_results(save_dir, None, S, {}, k, model_name, dataset)
 
     t1 = time.time()
     print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
 
-    if any(sort_by.startswith(x) for x in ['dpp']):
-        output = {'inds': inds}
-        if pkl_extra:
-            output.update(pkl_extra)
-        save_to_pickle(
-            save_path=os.path.join(save_dir, f'{sort_by}.pkl'),
-            output=output)
-    else:
-        save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=False)
-        save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=True)
-
-        ## use `note_pruning` to generate scores for curriculum learning.
-        model_name = os.path.basename(lm_output_dir)
-        for pacing_fn in [sort_by, sort_by+'_neg']:
-            curriculum_output_dir = os.path.join('curriculum', model_name, dataset, pacing_fn)
-            os.makedirs(curriculum_output_dir, exist_ok=True)
-            save_path = os.path.join(curriculum_output_dir, 'scores.pkl')
-            output = {'S': -S if pacing_fn.endswith('_neg') else S}
-            save_to_pickle(save_path=save_path, output=output)
-
+    if sort_by.startswith('rho'):
+        save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, dataset)
 
 
 
@@ -271,14 +293,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="lima")
     parser.add_argument("--sort_by", type=str, default="prob")
-    parser.add_argument("--lm_output_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs/llama-7b")
-    parser.add_argument("--save_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data_inds/llama-7b/")
+    parser.add_argument("--model_name", type=str, default="llama-7b")
+    parser.add_argument("--save_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data_inds/")
     parser.add_argument("--test_run", action='store_true', default=False)
     args = parser.parse_args()
 
     print(json.dumps(vars(args), indent=2))
 
-    args.save_dir = os.path.join(args.save_dir, args.dataset)
+    args.save_dir = os.path.join(args.save_dir, args.model_name, args.dataset)
     os.makedirs(args.save_dir, exist_ok=True)
 
     prune_data(**vars(args))

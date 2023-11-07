@@ -114,18 +114,18 @@ def get_dataset_token_lengths(dataset, model_name_or_path, tokenizer, inds=None)
             'output_len': ds['output_len']}
 
 
-def get_lm_output(dataset, model_name, return_text_embedding=True):
+def get_lm_output(dataset, model_name, return_text_embedding=True, fill_nan=True):
     """`model_name` is name of directory under `model_outputs`. """
     save_path = os.path.join(lm_output_dir, model_name, f'{dataset}.pkl')
     with open(save_path, 'rb') as f:
         output = pickle.load(f)
-    for k in output.keys():
-        if k != 'text_emedding':
-            output[k] = np.nan_to_num(output[k], nan=np.nanmean(output[k])) 
     if not return_text_embedding:
-        for k in ['text_embedding', 'text_embeddings']:
+        for k in ['text_embedding', 'text_embeddings', 'grad_rp_loraB']:
             if k in output:
                 del output[k]
+    if fill_nan:
+        for k in [k for k, v in output.items() if v.squeeze().ndim==1]:
+            output[k] = np.nan_to_num(output[k], nan=np.nanmean(output[k])) 
     return output
 
 
