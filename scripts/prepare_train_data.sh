@@ -107,6 +107,14 @@ wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/
 wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_8.jsonl
 wget -P data/raw_train/ultrachat/full https://huggingface.co/datasets/stingning/ultrachat/resolve/main/train_9.jsonl
 
+# split long conversations
+output_dir="data/raw_train/ultrachat/full_splitlongconv_2048/"
+mkdir -p "$output_dir"
+for input_file in data/raw_train/ultrachat/full/*.jsonl; do
+    output_file="$output_dir$(basename "$input_file")"
+    python scripts/split_ultrachat_conversations.py --in-file "$input_file" --out-file "$output_file" --model-name-or-path "results/baselines/huggyllama/llama-7b" --max-length 2048
+done
+
 
 
 # ## flan v2 full dataset processing

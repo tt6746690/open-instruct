@@ -557,22 +557,45 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=100000, num_g
 
 
 def convert_ultrachat_data(data_dir, output_dir):
-    from datasets import load_dataset
-    output_path = os.path.join(output_dir, 'ultrachat_data.jsonl')
-    # ds = load_dataset('HuggingFaceH4/ultrachat_200k', cache_dir=data_dir, split='train_sft')
-    ds = load_dataset('json', data_files={'train': os.path.join(data_dir, 'ultrachat_200k_splitlongconv.json')}, split='train', cache_dir=data_dir, keep_in_memory=True)
-    # splitting conversations removes "prompt" already.
-    ds = ds.remove_columns(["prompt_id"])
+    from datasets import load_dataset, concatenate_datasets
+
+    # ## wpq: ultrachat200k
+    # output_path = os.path.join(output_dir, 'ultrachat_data.jsonl')
+    # # ds = load_dataset('HuggingFaceH4/ultrachat_200k', cache_dir=data_dir, split='train_sft')
+    # ds = load_dataset('json', data_files={'train': os.path.join(data_dir, 'ultrachat_200k_splitlongconv.json')}, split='train', cache_dir=data_dir)
+    # # splitting conversations removes "prompt" already.
+    # ds = ds.remove_columns(["prompt_id"])
+    # def add_metadata_fn(example, idx):
+    #     example.update({'dataset': 'ultrachat', 'id': f'ultrachat_{idx}'})
+    #     return example
+    # ds = ds.map(add_metadata_fn, 
+    #             with_indices=True, 
+    #             num_proc=10)
+    # # re-ordering the features
+    # ds =  ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
+    # ds.to_json(output_path)
+
+    ## wpq: ultrachat1.5m
+    data_files = {f'train_{i}': os.path.join(data_dir, 'full_splitlongconv_2048', f'train_{i}.jsonl') 
+                  for i in range(10)}
+    ds = load_dataset('json', data_files=data_files, cache_dir=os.path.join(data_dir, 'full_splitlongconv_2048'))
+    ds = concatenate_datasets([ds[f'train_{i}'] for i in range(10)])
     def add_metadata_fn(example, idx):
         example.update({'dataset': 'ultrachat', 'id': f'ultrachat_{idx}'})
         return example
-    ds = ds.map(add_metadata_fn, 
-                with_indices=True, 
-                num_proc=10,
-                keep_in_memory=True)
-    # re-ordering the features
-    ds =  ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
-    ds.to_json(output_path)
+    ds = ds.map(add_metadata_fn, with_indices=True, num_proc=10)
+    # too memory/compute intense.
+    # ds = ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
+
+    save_path = os.path.join(output_dir, f'ultrachat15_data.jsonl')
+    ds.to_json(save_path)
+
+    num_shards = 10
+    for i in range(num_shards):
+        ds_shard = ds.shard(num_shards, i, contiguous=True)
+        save_path = os.path.join(output_dir, f'ultrachat15_{i}_data.jsonl')
+        ds_shard.to_json(save_path)
+
 
 
 def get_all_supported_datasets():   
