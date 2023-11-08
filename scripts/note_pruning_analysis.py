@@ -68,24 +68,25 @@ def get_dataset_size(data_dir = 'data/processed'):
 
     
 def get_dataset(dataset, processed=True):
-    data_dir = processed_dir if processed else data_raw_dir
-
-    if processed:
-        if 'tulu' in dataset:
-            train_file = os.path.join(processed_dir, 'tulu', f'{dataset}.jsonl')
-        elif 'flan2022' in dataset:
-            train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
-        else:
-            train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
+    if dataset.endswith(('jsonl', 'json')):
+        train_file = dataset
     else:
-        if dataset == 'lima':
-            train_file = os.path.join(data_raw_dir, 'lima', 'train.jsonl')
-        elif 'flan2022' in dataset:
-            train_file = os.path.join(data_raw_dir, 'flan2022', f'{dataset}.jsonl')
-        elif 'tulu' in dataset:
-            train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.jsonl')
+        if processed:
+            if 'tulu' in dataset:
+                train_file = os.path.join(processed_dir, 'tulu', f'{dataset}.jsonl')
+            elif 'flan2022' in dataset:
+                train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
+            else:
+                train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
         else:
-            train_file = os.path.join(data_raw_dir, dataset)
+            if dataset == 'lima':
+                train_file = os.path.join(data_raw_dir, 'lima', 'train.jsonl')
+            elif 'flan2022' in dataset:
+                train_file = os.path.join(data_raw_dir, 'flan2022', f'{dataset}.jsonl')
+            elif 'tulu' in dataset:
+                train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.jsonl')
+            else:
+                train_file = os.path.join(data_raw_dir, dataset)
     ds = load_dataset(
         'json', 
         data_files={'train': train_file}, 
@@ -94,10 +95,12 @@ def get_dataset(dataset, processed=True):
     return ds
 
 
-def get_dataset_token_lengths(dataset, model_name_or_path, tokenizer, inds=None):
+def get_dataset_token_lengths(dataset, tokenizer, inds=None):
     from open_instruct.finetune_trainer import encode_with_messages_format
-
-    ds = get_dataset(dataset)
+    if isinstance(dataset, str):
+        ds = get_dataset(dataset)
+    else:
+        ds = dataset
     if inds is not None: ds = ds.select(inds)
     encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=2048)
     ds = ds.map(encode_fn, batched=False, num_proc=16)

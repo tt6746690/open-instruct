@@ -279,7 +279,7 @@ def prune_data(dataset, sort_by, save_dir, model_name, test_run):
     t1 = time.time()
     print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
 
-    if sort_by.startswith('rho'):
+    if not sort_by.startswith('rho'):
         save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, dataset)
 
 
