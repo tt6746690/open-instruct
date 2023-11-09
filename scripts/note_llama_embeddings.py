@@ -438,6 +438,8 @@ def compute_lm_outputs(
     processed_dir = '../data/processed'
     if 'flan2022' in dataset:
         train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
+    if 'ultrachat' in dataset:
+        train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
     else:
         train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
     assert(os.path.isfile(train_file))

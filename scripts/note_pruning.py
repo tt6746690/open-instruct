@@ -260,7 +260,12 @@ def prune_data(dataset, sort_by, save_dir, model_name, test_run):
         emb = d[embed_type]
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
     elif sort_by.startswith('rho'):
-        model_names = [x.strip() for x in model_name.split('__rho__')]
+        if sort_by == 'rhov1':
+            model_names = ['mistral-7b+lora:r=256:a=256',
+                        'mistral-7b-ultrachat200k-v1+lora:r=256:a=256']
+            assert(model_name == model_names[0])
+        else:
+            raise ValueError(f'sort_by={sort_by} not implemented.')
         assert(len(model_names) == 2)
         ds = []
         for x in model_names:
@@ -274,7 +279,8 @@ def prune_data(dataset, sort_by, save_dir, model_name, test_run):
             nan_mask = np.logical_or(np.isnan(S0), np.isnan(S1))
             S = np.subtract(S0, S1)
             S[nan_mask] = np.nan
-            save_prune_results(save_dir, None, S, {}, k, model_name, dataset)
+            S = S.squeeze()
+            save_prune_results(save_dir, None, S, {}, f'{sort_by}_{k}', model_name, dataset)
 
     t1 = time.time()
     print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
