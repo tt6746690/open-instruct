@@ -558,6 +558,9 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
+    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir and os.path.isfile(os.path.join(training_args.output_dir, 'pytorch_model.bin')):
+        raise ValueError('Finished training already. Exit now.')
+
     # wpq: convert str to dict
     if data_args.subsample_mixture is not None:
         data_args.subsample_mixture = re.compile('(?<!\\\\)\'').sub('\"', data_args.subsample_mixture)

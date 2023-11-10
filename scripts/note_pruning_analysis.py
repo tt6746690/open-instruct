@@ -117,7 +117,7 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None):
         output_len = x.shape[0] - input_len
         return {'input_len': input_len, 'output_len': output_len}
 
-    ds = ds.map(count_token_lengths, num_proc=16)
+    ds = ds.map(count_token_lengths, num_proc=32)
     return {'input_len': ds['input_len'], 
             'output_len': ds['output_len']}
 
@@ -125,8 +125,22 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None):
 def get_lm_output(dataset, model_name, return_text_embedding=True, fill_nan=True):
     """`model_name` is name of directory under `model_outputs`. """
     save_path = os.path.join(lm_output_dir, model_name, f'{dataset}.pkl')
-    with open(save_path, 'rb') as f:
-        output = pickle.load(f)
+    if dataset == 'ultrachat15' and os.path.isfile(save_path):
+        ## concat ultrachat data shards.
+        output = {}
+        for i in range(10):
+            with open(os.path.join(lm_output_dir, model_name, f'{dataset}_{i}.pkl'), 'rb') as f:
+                output_i = pickle.load(f)
+                for k, v in output_i.items():
+                    if k not in output:
+                        output[k] = []
+                    output[k].append(v)
+        output = {k: np.vstack(v) for k, v in output.items()}     
+        with open(save_path, 'wb') as f:
+            pickle.dump(output, f)
+    else:
+        with open(save_path, 'rb') as f:
+            output = pickle.load(f)
     if not return_text_embedding:
         for k in ['text_embedding', 'text_embeddings', 'grad_rp_loraB']:
             if k in output:
