@@ -44,6 +44,8 @@ def split_one_sample(sample):
             else:
                 start_idx = i
             cur_len = 0
+            ## wpq: just discard conversation starting from the middle, since there is no context.
+            break
         elif i == len(conversations) - 2:
             new_samples.append(make_sample(sample, start_idx, i + 2))
 
@@ -90,10 +92,17 @@ def filter_invalid_roles(content):
 
 
 def main(args):
-    if args.in_files == ['HuggingFaceH4/ultrachat_200k']:
+    if args.in_files[0].startswith('HuggingFaceH4/ultrachat_200k'):
+        if 'train' in args.in_files[0]:
+            split = 'train_sft'
+        elif 'test' in args.in_files[0]:
+            split = 'test_sft'
+        else:
+            raise ValueError('unknown split')
+
         data_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data/raw_train/ultrachat'
         from datasets import load_dataset
-        ds = load_dataset('HuggingFaceH4/ultrachat_200k', cache_dir=data_dir, split='train_sft')
+        ds = load_dataset('HuggingFaceH4/ultrachat_200k', cache_dir=data_dir, split=split)
         ## wpq: convert the formatting to use the split conversation code.
         def convert_message_to_sharegpt_chat_format(m):
             return {'from': 'gpt' if m['role']=='assistant' else 'human',
@@ -116,14 +125,14 @@ def main(args):
     use_fast = 'mpt' in args.model_name_or_path
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         args.model_name_or_path,
-        use_fast=use_fast,
+        use_fast=use_fast, # prefer slow tokenizer.
     )
     new_content = split_all(content, args.begin, args.end, tokenizer, args.max_length)
     print(f"after split:  {len(new_content)}")
     new_content = filter_invalid_roles(new_content)
     print(f"after filter: {len(new_content)}")
 
-    if args.in_files == ['HuggingFaceH4/ultrachat_200k']:
+    if args.in_files[0].startswith('HuggingFaceH4/ultrachat_200k'):
         ## wpq: convert back to ultrachat format
         def convert_messages_to_ultrachat_format(m):
             return {'content': m['value'], 

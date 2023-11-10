@@ -123,13 +123,18 @@ done
 #
 ## Use pre-downloaded huggingface's dataset and split long ultrachat conversations
 python scripts/split_sharegpt_conversations.py \
-    --in-files HuggingFaceH4/ultrachat_200k \
-    --out-file data/raw_train/ultrachat/ultrachat_200k_splitlongconv.json \
+    --in-files HuggingFaceH4/ultrachat_200k_train_sft \
+    --out-file data/raw_train/ultrachat/ultrachat_200k_train_splitlongconv.json \
+    --model-name-or-path results/baselines/huggyllama/llama-7b \
+    --max-length 2048
+python scripts/split_sharegpt_conversations.py \
+    --in-files HuggingFaceH4/ultrachat_200k_test_sft \
+    --out-file data/raw_train/ultrachat/ultrachat_200k_test_splitlongconv.json \
     --model-name-or-path results/baselines/huggyllama/llama-7b \
     --max-length 2048
 
 # # reformat ultrachat 200k
-# python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset ultrachat
+python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset ultrachat
 
 
 

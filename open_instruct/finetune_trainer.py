@@ -643,6 +643,10 @@ def main():
         dataset_args = {}
         if data_args.train_file is not None:
             data_files["train"] = data_args.train_file
+        if 'ultrachat' in data_args.train_file:
+            data_files['test'] = (
+                '/gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/open-instruct/'
+                'data/processed/ultrachat/ultrachat200k_test_data.jsonl')
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
@@ -650,6 +654,9 @@ def main():
             use_auth_token=True if model_args.use_auth_token else None,
             **dataset_args,
         )
+        if 'ultrachat' in data_args.train_file:
+            raw_datasets['test'] = raw_datasets['test'].select(range(1000))
+
 
     config_kwargs = {
         "cache_dir": model_args.cache_dir,
@@ -717,7 +724,7 @@ def main():
     # here we add all special tokens again, because the default ones are not in the special_tokens_map 
     if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
         from transformers import AddedToken
-        tokenizer.add_special_tokens({
+        num_added_tokens = tokenizer.add_special_tokens({
             "bos_token": AddedToken("<s>", normalized=False, special=True),
             "eos_token": AddedToken("</s>", normalized=False, special=True),
             "unk_token": AddedToken("<unk>", normalized=False, special=True),
@@ -859,6 +866,7 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
+        eval_dataset=lm_datasets['test'] if training_args.do_eval else None,
         tokenizer=tokenizer,
         data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model),
     )
