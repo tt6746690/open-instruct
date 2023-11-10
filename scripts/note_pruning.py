@@ -281,11 +281,25 @@ def prune_data(dataset, sort_by, save_dir, model_name, test_run):
             S[nan_mask] = np.nan
             S = S.squeeze()
             save_prune_results(save_dir, None, S, {}, f'{sort_by}_{k}', model_name, dataset)
+    elif sort_by.startswith('numtoks'):
+        from transformers import AutoTokenizer
+        from note_pruning_analysis import get_dataset_token_lengths
+        if 'llama' in model_name or 'mistral' in model_name:
+            tokenizer = AutoTokenizer.from_pretrained('huggyllama/llama-7b', use_fast=False)
+        else:
+            raise ValueError('Need to supply appropriate tokenizer to count token lengths,')
+        d = get_dataset_token_lengths(dataset, tokenizer)
+
+        d['total_len'] = d['input_len'] + d['output_len']
+        for k in ['input', 'output', 'total']:
+            S = d[f'{k}_len']
+            save_prune_results(save_dir, None, S, {}, f'{sort_by}_{k}', model_name, dataset)
+
 
     t1 = time.time()
     print(f'Rank datapoints with {sort_by} took {t1-t0:.2f} seconds.')
 
-    if not sort_by.startswith('rho'):
+    if not any(sort_by.startswith(x) for x in ['rho', 'numtoks']):
         save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, dataset)
 
 
