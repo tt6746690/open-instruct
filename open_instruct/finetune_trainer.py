@@ -614,10 +614,12 @@ def main():
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
         if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
-            raise ValueError(
-                f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-                "Use --overwrite_output_dir to overcome."
-            )
+            # wpq: since I do write `.json` file to output_dir, raise if there are more files.
+            if len(os.listdir(training_args.output_dir))>1:
+                raise ValueError(
+                    f"Output directory ({training_args.output_dir}) already exists and is not empty. "
+                    "Use --overwrite_output_dir to overcome."
+                )
         elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
             logger.info(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
@@ -684,9 +686,6 @@ def main():
             "You are instantiating a new tokenizer from scratch. This is not supported by this finetuning script."
         )
 
-    if isinstance(tokenizer, LlamaTokenizerFast):
-        raise ValueError('LlamaTokenizerFast cannot encode eos token </s> properly in transformres v4.35.0. See https://github.com/huggingface/transformers/issues/23833 for more details.')
-
     if model_args.model_name_or_path:
         torch_dtype = (
             model_args.torch_dtype
@@ -717,14 +716,25 @@ def main():
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map 
     if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
-        num_added_tokens = tokenizer.add_special_tokens({
-            # llama tokenizer already has bos/eos/unk added. transformers v4.35.0 returns `num_added_tokens=4` even if only the pad token is added. So just add the pad token here to pass the assertion.
-            # "bos_token": "<s>",
-            # "eos_token": "</s>",
-            # "unk_token": "<unk>",
-            "pad_token": "<pad>",
+        from transformers import AddedToken
+        tokenizer.add_special_tokens({
+            "bos_token": AddedToken("<s>", normalized=False, special=True),
+            "eos_token": AddedToken("</s>", normalized=False, special=True),
+            "unk_token": AddedToken("<unk>", normalized=False, special=True),
+            "pad_token": AddedToken("<pad>", normalized=False, special=True),
         })
-        assert num_added_tokens in [0, 1], "LlamaTokenizer/ LlamaTokenizerFast should only add one special token - the pad_token, or no tokens if pad token present."
+        ## wpq: for `huggyllama`/`NousResearch/Llama-2-7b-hf`, `LlamaTokenizerFast` tokenizer config not properly implemented and cannot tokenize special tokens like eos_token corretly. Need the followign workaround. More details: https://github.com/huggingface/transformers/issues/23833
+        if isinstance(tokenizer, LlamaTokenizerFast):
+            from secrets import token_hex
+            tmp_tok_path = f'/tmp/wpq_tok_{token_hex(16)}'
+            tokenizer.save_pretrained(tmp_tok_path)
+            tokenizer = AutoTokenizer.from_pretrained(tmp_tok_path, **tokenizer_kwargs)
+        
+        for s, s_tokenized in [
+            ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
+            ['▁Hi', '<s>', '▁Hey', '</s>', '▁sir', '<unk>', '▁what', '<pad>', '<pad>']),
+        ]:
+            assert(tokenizer.tokenize(s, add_special_tokens=False)==s_tokenized)
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         num_added_tokens = tokenizer.add_special_tokens({
             "pad_token": "<pad>",
