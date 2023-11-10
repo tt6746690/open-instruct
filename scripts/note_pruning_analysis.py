@@ -76,6 +76,11 @@ def get_dataset(dataset, processed=True):
                 train_file = os.path.join(processed_dir, 'tulu', f'{dataset}.jsonl')
             elif 'flan2022' in dataset:
                 train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
+            elif 'ultrachat' in dataset:
+                if dataset == 'ultrachat200k':
+                    train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_train_data.jsonl')
+                else:
+                    train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
             else:
                 train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
         else:
@@ -103,7 +108,7 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None):
         ds = dataset
     if inds is not None: ds = ds.select(inds)
     encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=2048)
-    ds = ds.map(encode_fn, batched=False, num_proc=16)
+    ds = ds.map(encode_fn, batched=False, num_proc=32)
     ds.set_format(type='np')
 
     def count_token_lengths(d):
