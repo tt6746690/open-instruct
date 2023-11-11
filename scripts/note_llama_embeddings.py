@@ -203,7 +203,7 @@ def gather_grad_embeddings(model, patterns, stacked=True):
 
 @torch.inference_mode()
 def compute_losses(logits, labels):
-    """ Computes Error l2 Norm score for pruning.
+    """ Computes a few different scores based on log probabilities 
         logits (Bsz, |Seq|, |Vocab|)
         labels (Bsz, |Seq|)
     """

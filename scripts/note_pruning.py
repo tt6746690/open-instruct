@@ -5,6 +5,7 @@ import json
 import random
 import time
 import numpy as np
+import pyarrow # need this before torch!
 import torch
 
 from note_pruning_analysis import lm_output_dir
@@ -284,8 +285,10 @@ def prune_data(dataset, sort_by, save_dir, model_name, test_run):
     elif sort_by.startswith('numtoks'):
         from transformers import AutoTokenizer
         from note_pruning_analysis import get_dataset_token_lengths
-        if 'llama' in model_name or 'mistral' in model_name:
+        if 'llama' in model_name:
             tokenizer = AutoTokenizer.from_pretrained('huggyllama/llama-7b', use_fast=False)
+        elif 'mistralai' in model_name:
+            tokenizer = AutoTokenizer.from_pretrained('mistalai/Mistral-7B-v0.1', use_fast=False)
         else:
             raise ValueError('Need to supply appropriate tokenizer to count token lengths,')
         d = get_dataset_token_lengths(dataset, tokenizer)
@@ -320,7 +323,7 @@ if __name__ == '__main__':
 
     print(json.dumps(vars(args), indent=2))
 
-    args.save_dir = os.path.join(args.save_dir, args.model_name, args.dataset)
+    # args.save_dir = os.path.join(args.save_dir, args.model_name, args.dataset)
     os.makedirs(args.save_dir, exist_ok=True)
 
     prune_data(**vars(args))
