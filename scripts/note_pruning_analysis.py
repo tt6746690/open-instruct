@@ -10,12 +10,10 @@ from functools import partial
 from collections import defaultdict
 import glob
 
-import matplotlib.pyplot as plt
-
 import pickle
 from tqdm import tqdm 
 
-import pyarrow
+import pyarrow # need this before torch!
 import torch
 import transformers
 from transformers import AutoTokenizer
@@ -108,7 +106,7 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None):
         ds = dataset
     if inds is not None: ds = ds.select(inds)
     encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=2048)
-    ds = ds.map(encode_fn, batched=False, num_proc=32)
+    ds = ds.map(encode_fn, batched=False, num_proc=64)
     ds.set_format(type='np')
 
     def count_token_lengths(d):
@@ -117,7 +115,7 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None):
         output_len = x.shape[0] - input_len
         return {'input_len': input_len, 'output_len': output_len}
 
-    ds = ds.map(count_token_lengths, num_proc=32)
+    ds = ds.map(count_token_lengths, num_proc=64)
     return {'input_len': ds['input_len'], 
             'output_len': ds['output_len']}
 

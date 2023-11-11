@@ -160,9 +160,6 @@ def generate_curriculum(path, pacing_fn, verbose=False, save_output=True):
         M = int(match.group(1)) # total data points over `num_epochs` epochs.
         match = re.search(r'ep=([^_]+)', pacing_fn)
         num_epochs = int(match.group(1))
-
-        if M >= len(inds_sorted):
-            raise ValueError(f'size={M} > len(inds)={len(inds_sorted)}')
             
         inds_to_inds_sorted = np.arange(len(inds_sorted))
 
@@ -171,6 +168,9 @@ def generate_curriculum(path, pacing_fn, verbose=False, save_output=True):
             sizes.append(int(M//num_epochs))
         sizes.append(int(M-np.sum(sizes)))
 
+        if max(sizes) >= len(inds_sorted):
+            raise ValueError(f'len(number of unique data point)={max(sizes)} > len(inds)={len(inds_sorted)}')
+        
         inds = []
         for size in sizes:
             inds_kept = list(inds_to_inds_sorted[:size])
