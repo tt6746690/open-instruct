@@ -559,7 +559,8 @@ def main():
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir and os.path.isfile(os.path.join(training_args.output_dir, 'pytorch_model.bin')):
-        raise ValueError('Finished training already. Exit now.')
+        print('Finished training already. Exit now.')
+        return
 
     # wpq: convert str to dict
     if data_args.subsample_mixture is not None:
@@ -641,7 +642,7 @@ def main():
             use_auth_token=True if model_args.use_auth_token else None,
             streaming=data_args.streaming,
         )
-    else:
+    else: 
         data_files = {}
         dataset_args = {}
         if data_args.train_file is not None:
@@ -733,13 +734,17 @@ def main():
             "unk_token": AddedToken("<unk>", normalized=False, special=True),
             "pad_token": AddedToken("<pad>", normalized=False, special=True),
         })
-        ## wpq: for `huggyllama`/`NousResearch/Llama-2-7b-hf`, `LlamaTokenizerFast` tokenizer config not properly implemented and cannot tokenize special tokens like eos_token corretly. Need the followign workaround. More details: https://github.com/huggingface/transformers/issues/23833
+        ## wpq: for `huggyllama`/`NousResearch/Llama-2-7b-hf`, `LlamaTokenizerFast` tokenizer config not properly implemented and cannot tokenize special tokens like eos_token corretly. Need the following workaround. More details: https://github.com/huggingface/transformers/issues/23833
         if isinstance(tokenizer, LlamaTokenizerFast):
-            from secrets import token_hex
-            tmp_tok_path = f'/tmp/wpq_tok_{token_hex(16)}'
+            if os.path.isdir(model_args.model_name_or_path):
+                tmp_tok_path = os.path.join(
+                    os.path.dirname(model_args.model_name_or_path),
+                    os.path.basename(model_args.model_name_or_path)+'_fixtok')
+            else:
+                from secrets import token_hex
+                tmp_tok_path = f'/tmp/wpq_tok_{token_hex(16)}'
             tokenizer.save_pretrained(tmp_tok_path)
             tokenizer = AutoTokenizer.from_pretrained(tmp_tok_path, **tokenizer_kwargs)
-        
         for s, s_tokenized in [
             ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
             ['▁Hi', '<s>', '▁Hey', '</s>', '▁sir', '<unk>', '▁what', '<pad>', '<pad>']),
@@ -869,7 +874,7 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=lm_datasets['test'] if training_args.do_eval else None,
+        eval_dataset=lm_datasets['test'] if (training_args.do_eval and 'test' in lm_datasets) else None,
         tokenizer=tokenizer,
         data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model),
     )
