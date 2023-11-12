@@ -23,7 +23,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
-
+from note_pruning_analysis import encode_just_one_role
 
 
 def sklearn_rp_mat_size(rp):
@@ -114,7 +114,9 @@ def get_grad_statistic_pattern(model_name_or_path, use_lora):
                 'last': r'\bembed_out\.weight\b',
             }
         else:
-            raise ValueError(f'Cannot find regex `patterns` for {model_name_or_path}')
+            grad_statistic_patterns = {
+                'all': r'.*'
+            }
     return grad_statistic_patterns
 
 
@@ -249,6 +251,11 @@ def compute_losses(logits, labels):
     return losses
 
 
+def mean_pooling(last_hidden_state, attention_mask):
+    input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+    return torch.sum(last_hidden_state * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+
+
 def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
         
     # Need to keep the same order as specified in `prepare_train_data.sh`
@@ -333,12 +340,15 @@ def compute_lm_outputs(
         use_dist=False,
         test_run=False,
         shuffle=False,
+        compute_loss=True,
         compute_grad=False,
         use_lora=False,
         lora_rank=128,
         lora_alpha=128,
         compute_grad_embeddings=False,
         grad_randproj_components=2048,
+        max_seq_len=2048,
+        encode_fn_type='sft',
     ):
     """
         `shuffle` to allow each process to process roughly similar workload cross the dataset 
@@ -368,11 +378,16 @@ def compute_lm_outputs(
 
     device = f'cuda:{str(local_rank)}'
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name_or_path,
-        device_map=device,
-        torch_dtype=torch.float16)
-    
+    if 'sentence-transformers' in model_name_or_path:
+        from transformers import AutoModel
+        model = AutoModel.from_pretrained(
+            model_name_or_path,
+            device_map=device)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name_or_path,
+            device_map=device,
+            torch_dtype=torch.float16)
 
     if use_lora:
         if not compute_grad:
@@ -445,8 +460,20 @@ def compute_lm_outputs(
     assert(os.path.isfile(train_file))
     
 
-    encode_function = partial(
-        encode_with_messages_format, tokenizer=tokenizer, max_seq_length=2048)
+    if encode_fn_type in ['input', 'output']:
+        encode_function = partial(
+            encode_just_one_role,
+            tokenizer=tokenizer,
+            max_seq_length=max_seq_len,
+            encode_fn_type=encode_fn_type)
+    elif encode_fn_type == 'sft':    
+        encode_function = partial(
+            encode_with_messages_format,
+            tokenizer=tokenizer,
+            max_seq_length=max_seq_len)
+    else:
+        raise ValueError(f'encode_fn_type={encode_fn_type} not implemented.')
+
 
     if rank == 0:
         raw_datasets = load_dataset("json", data_files={'train': train_file})
@@ -454,7 +481,7 @@ def compute_lm_outputs(
         #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
         print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
         lm_datasets = raw_datasets.map(
-            encode_function, batched=False, num_proc=16,
+            encode_function, batched=False, num_proc=32,
             desc="Tokenizing and reformatting instruction data")
     if use_dist:
         dist.barrier()
@@ -504,17 +531,20 @@ def compute_lm_outputs(
                 outputs = model(**batch, output_hidden_states=True)
         
         # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
-        text_embedding = outputs['hidden_states'][-1].mean(1)
+        last_hidden_state = outputs['hidden_states'][-1]
+        text_embedding = mean_pooling(last_hidden_state, batch['attention_mask'])
         output['text_embedding'].append(text_embedding.to(torch.float32).detach().cpu())
-        
-        # average of output token log probs
-        output['log_prob'].append(-outputs['loss'].detach().cpu())
-        
-        # el2n scores
-        losses = compute_losses(outputs['logits'], batch['labels'])
-        for k in ['el2n_agg=mean', 'el2n_agg=l2n', 'logit_margin']:
-            output[k].append(losses[k].detach().cpu())
-        
+
+        if compute_loss:
+            # average of output token log probs
+            if 'loss' in outputs:
+                output['log_prob'].append(-outputs['loss'].detach().cpu())
+            
+            # el2n scores
+            losses = compute_losses(outputs['logits'], batch['labels'])
+            for k in ['el2n_agg=mean', 'el2n_agg=l2n', 'logit_margin']:
+                output[k].append(losses[k].detach().cpu())
+            
         if compute_grad:
             ## gradient statistic
             grad_statistics = compute_grad_statistic(model, grad_statistic_patterns)
@@ -606,7 +636,9 @@ if __name__ == "__main__":
         --compute_grad \
         --use_lora \
         --compute_grad_embeddings \
-        --grad_randproj_components 2048
+        --grad_randproj_components 2048 \
+        --max_seq_len 2048 \
+        --encode_fn_type sft
     """
 
     import argparse
@@ -617,12 +649,16 @@ if __name__ == "__main__":
     parser.add_argument("--use_dist", action='store_true', default=False)
     parser.add_argument("--test_run", action='store_true', default=False)
     parser.add_argument("--shuffle", action='store_true', default=False)
+    parser.add_argument("--compute_loss", action='store_true', default=False)
     parser.add_argument("--compute_grad", action='store_true', default=False)
     parser.add_argument("--use_lora", action='store_true', default=False)
     parser.add_argument("--lora_rank", type=int, default=128)
     parser.add_argument("--lora_alpha", type=int, default=128)
     parser.add_argument("--compute_grad_embeddings", action='store_true', default=False)
     parser.add_argument("--grad_randproj_components", type=int, default=2048)
+    parser.add_argument("--max_seq_len", type=int, default=2048)
+    parser.add_argument("--encode_fn_type", type=str, default='sft')
+
 
 
     args = parser.parse_args()

@@ -326,11 +326,11 @@ def encode_with_prompt_completion_format(example, tokenizer, max_seq_length):
         example_text = example['prompt'] + ' ' + example['completion']
     else:
         example_text = example['prompt'] + example['completion']
-    example_text = example_text + tokenizer.eos_token
     tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
     input_ids = tokenized_example.input_ids
     labels = input_ids.clone()
-    tokenized_prompt = tokenizer(example['prompt'], return_tensors='pt', max_length=max_seq_length, truncation=True)
+    ## wpq: `rstrip()` due to the space between prompt & completion, is a stand-alone token when tokenizing prompt, but not prompt+completion.
+    tokenized_prompt = tokenizer(example['prompt'].rstrip(' '), return_tensors='pt', max_length=max_seq_length, truncation=True)
     # mask the prompt part for avoiding loss
     labels[:, :tokenized_prompt.input_ids.shape[1]] = -100
     attention_mask = torch.ones_like(input_ids)
@@ -384,8 +384,8 @@ def encode_with_messages_format(example, tokenizer, max_seq_length):
                 messages_so_far = _concat_messages(messages[:message_idx+1])
             message_end_idx = tokenizer(
                 messages_so_far,
-                return_tensors='pt', 
-                max_length=max_seq_length, 
+                return_tensors='pt',
+                max_length=max_seq_length,
                 truncation=True
             ).input_ids.shape[1]
             labels[:, message_start_idx:message_end_idx] = -100
@@ -740,10 +740,12 @@ def main():
                 tmp_tok_path = os.path.join(
                     os.path.dirname(model_args.model_name_or_path),
                     os.path.basename(model_args.model_name_or_path)+'_fixtok')
+                if not os.path.isdir(tmp_tok_path):
+                    raise ValueError(f'Not valid fixtok path: {tmp_tok_path}')
             else:
                 from secrets import token_hex
                 tmp_tok_path = f'/tmp/wpq_tok_{token_hex(16)}'
-            tokenizer.save_pretrained(tmp_tok_path)
+                tokenizer.save_pretrained(tmp_tok_path)
             tokenizer = AutoTokenizer.from_pretrained(tmp_tok_path, **tokenizer_kwargs)
         for s, s_tokenized in [
             ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
