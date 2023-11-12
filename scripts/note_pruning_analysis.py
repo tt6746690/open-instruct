@@ -211,6 +211,10 @@ def convert_example_to_str(idx, example):
 
 
 def write_ds_to_file_for_reading(dataset, output_path, num_examples=None):
+    """
+    from note_pruning_analysis import write_ds_to_file_for_reading
+    write_ds_to_file_for_reading(ds, 'text_viz/data/processed/lima.txt', num_examples=200)
+    """
 
     # output_dir = os.path.join(text_viz_path, os.path.dirname(output_path))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -285,3 +289,46 @@ def sample_indices_given_scores(scores, portion):
     return inds
 
 
+
+def viz_tokenizer_outputs(outputs, tokenizer=None):
+    import pandas as pd
+    outputs = {k: v for k, v in outputs.items() if isinstance(v, (list, torch.Tensor, np.ndarray))}
+    outputs = {k: v.squeeze().tolist() if isinstance(v, torch.Tensor) else v 
+               for k, v in outputs.items()}
+    outputs = {k: v[0] if isinstance(v, list) and isinstance(v[0], list) and len(v)==1 else v
+               for k, v in outputs.items()}
+    print(outputs)
+    if tokenizer is not None:
+        toks = tokenizer.convert_ids_to_tokens(outputs['input_ids'])
+        data = {'toks': toks}
+    else:
+        data = {}
+    data.update(outputs)
+    l = max(len(v) for v in data.values())
+    for k, v in data.items():
+        if len(v) < l:
+            data[k] = [np.nan]*(l-len(v)) + v
+    df = pd.DataFrame(data, index=range(len(data['input_ids'])))
+    return df
+
+
+def encode_just_one_role(example, tokenizer, max_seq_length, encode_fn_type):
+    messages = example['messages']
+    assert(len(messages) == 2)
+    
+    if encode_fn_type == 'input':
+        text = messages[0]['content']
+    elif encode_fn_type == 'output':
+        text = messages[1]['content']
+    else:
+        raise ValueError(f'encode_fn_type={encode_fn_type} not supported.')
+    tokenized_example = tokenizer(
+        text, return_tensors='pt', max_length=max_seq_length, truncation=True)
+    input_ids = tokenized_example.input_ids
+    attention_mask = tokenized_example.attention_mask
+    labels = input_ids.clone()
+    
+    return {'text': text,
+            'input_ids': input_ids.flatten(),
+            'labels': labels.flatten(),
+            'attention_mask': attention_mask.flatten()}
