@@ -203,6 +203,72 @@ def get_cluster_info(texts, labels, topk_indices):
     return cluster_info
 
 
+
+
+def chat_completion_openai(
+    messages,
+    model='gpt-3.5-turbo',
+    temperature=0,
+    max_tokens=512,
+    ):
+
+    import openai
+    output = "$ERROR$"
+    for _ in range(16):
+        try:
+            response = openai.ChatCompletion.create(
+                model=model,
+                messages=messages,
+                n=1,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            output = response["choices"][0]["message"]["content"]
+            break
+        except openai.error.OpenAIError as e:
+            print(type(e), e)
+            time.sleep(10)
+
+    return output
+
+
+
+
+def summarize_cluster():
+
+    cluster_infos = pickle.load(open(args.input_file, "rb"))
+    num_total_prompts = sum([x[0] for x in cluster_infos])
+
+    topics = []
+    percentages = []
+    for i, info in enumerate(cluster_infos):
+        num_samples, topk_prompts, random_prompts = info
+        percentage = num_samples / num_total_prompts
+        print(
+            f"cluster {i}, #prompts {num_samples}, percentage: {percentage * 100:.2f}%"
+        )
+        instruct = "Given a list of user messages, use less than 8 words to summarize a central topic for all messages in English. Your output should only include a single line. Try to be specific."
+        split = int(args.num_prompts * 0.8)
+        prompt = "\n".join(
+            [truncate_string(x, l=200) for x in topk_prompts[:split]]
+            + [
+                truncate_string(x, l=200)
+                for x in random_prompts[: args.num_prompts - split]
+            ]
+        )
+        prompt = "BEGIN OF THE MESSAGE LIST\n" + prompt + "\nEND OF THE MESSAGE LIST."
+
+        topic = chat_completion_openai(messages, model='gpt-3.5-turbo', temperature=0, max_tokens=256)
+        print(topic)
+
+        topics.append(topic)
+        percentages.append(round(percentage, 6))
+
+    print()
+    print(f"topics: {topics}")
+    print(f"percentages: {percentages}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-file", type=str, required=True)

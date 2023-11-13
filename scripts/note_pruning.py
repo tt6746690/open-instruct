@@ -66,11 +66,11 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
         **kmeans_fn_kwargs)
 
     if dist_fn == 'cd':
-        X = X / np.linalg.norm(X, axis=1, ord=2)[:, np.newaxis]
+        X = X / np.linalg.norm(X, axis=1, ord=2, keepdims=True)
     kmeans.fit(X)
     P = kmeans.cluster_centers_[kmeans.labels_]
     if dist_fn == 'cd':
-        P = P / np.linalg.norm(P, axis=1, ord=2)[:, np.newaxis]
+        P = P / np.linalg.norm(P, axis=1, ord=2, keepdims=True)
         D = 1 - np.sum(X*P, axis=1) # cosine distance!
     else:
         D = np.linalg.norm(X - P, axis=1)

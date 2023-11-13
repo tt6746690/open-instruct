@@ -120,9 +120,12 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None):
             'output_len': ds['output_len']}
 
 
-def get_lm_output(dataset, model_name, return_text_embedding=True, fill_nan=True):
+def get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embedding=True, fill_nan=True):
     """`model_name` is name of directory under `model_outputs`. """
-    save_path = os.path.join(lm_output_dir, model_name, f'{dataset}.pkl')
+    if encode_fn_type != 'sft':
+        save_path = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}.pkl')
+    else:
+        save_path = os.path.join(lm_output_dir, model_name, f'{dataset}.pkl')
     if dataset == 'ultrachat15' and os.path.isfile(save_path):
         ## concat ultrachat data shards.
         output = {}

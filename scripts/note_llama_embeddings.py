@@ -72,7 +72,6 @@ def plt_pair_of_dists(D1, D2, n_components, use_hexbin=True):
     ax.set_ylabel("Pairwise dist projected")
     ax.set_title(f"Pairwise dist (M={n_components})")
 
-    
 
     rates = D2 / D1
 
