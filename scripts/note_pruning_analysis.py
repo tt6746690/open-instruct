@@ -315,28 +315,6 @@ def viz_tokenizer_outputs(outputs, tokenizer=None):
     return df
 
 
-def encode_just_one_role(example, tokenizer, max_seq_length, encode_fn_type):
-    messages = example['messages']
-    assert(len(messages) == 2)
-    
-    if encode_fn_type == 'input':
-        text = messages[0]['content']
-    elif encode_fn_type == 'output':
-        text = messages[1]['content']
-    else:
-        raise ValueError(f'encode_fn_type={encode_fn_type} not supported.')
-    tokenized_example = tokenizer(
-        text, return_tensors='pt', max_length=max_seq_length, truncation=True)
-    input_ids = tokenized_example.input_ids
-    attention_mask = tokenized_example.attention_mask
-    labels = input_ids.clone()
-    
-    return {'text': text,
-            'input_ids': input_ids.flatten(),
-            'labels': labels.flatten(),
-            'attention_mask': attention_mask.flatten()}
-
-
 def sort_cluster_results_by_cluster_size(Y, C, descending=True):
     """Sort and reassign cluster labels s.t. such that 
         lower indexed cluster center class has more points.
@@ -484,18 +462,10 @@ def clustering_run(run_name, X):
                 max_no_improvement=100,
                 reassignment_ratio=1e-4,
             )
-        t0 = time.time()
         clustering_model.fit(X)
-        t1 = time.time()
         Y = clustering_model.labels_
         C = clustering_model.cluster_centers_
     else:
         raise ValueError(f'clustering_algo={clustering_algo} not implemented.')
     
-    Y, C = sort_cluster_results_by_cluster_size(Y, C)
-
-    scores = clustering_algorithm_scores(X, Y)
-    scores['inertia'] = clustering_model.inertia_
-    scores['time_elapsed'] = t1-t0
-    
-    return Y, C, scores
+    return Y, C, clustering_model
