@@ -1,6 +1,5 @@
 import os
 import re
-import argparse
 import json
 import pickle
 import time
@@ -9,8 +8,6 @@ import numpy as np
 import scipy
 import pandas as pd
 import sklearn
-
-from transformers import AutoTokenizer, AutoModel
 
 import pyarrow
 import torch
@@ -178,7 +175,7 @@ def clustering_algorithm_scores(X, Y):
 
 
 def clustering_run(run_name, X):
-    import sklearn
+    from sklearn.cluster import KMeans, MiniBatchKMeans
 
     match = re.search(r'cl=([^_]+)', run_name)
     clustering_algo = match.group(1)
@@ -187,7 +184,7 @@ def clustering_run(run_name, X):
 
     if clustering_algo.startswith('kmeans'):
         if clustering_algo == 'kmeans':
-            clustering_model = sklearn.cluster.KMeans(
+            clustering_model = KMeans(
                 n_clusters=n_clusters,
                 init='k-means++',
                 n_init="auto",
@@ -197,7 +194,7 @@ def clustering_run(run_name, X):
         elif clustering_algo == 'kmeansminibatch':
             match = re.search(r'bsz=([^_]+)', run_name)
             batch_size = int(match.group(1)) if match else 1024
-            clustering_model = sklearn.cluster.MiniBatchKMeans(
+            clustering_model = MiniBatchKMeans(
                 n_clusters=n_clusters,
                 init='k-means++',
                 n_init="auto",
@@ -275,7 +272,7 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
 
     cluster_sizes = np.unique(Y, return_counts=True)[1].tolist()
 
-    for dist_type in ['l2', 'cd']:
+    for dist in ['l2', 'cd']:
         df_topk = df.sort_values(by=['cluster_assignment', f'cent_dist_{dist}']) \
                     .groupby('cluster_assignment') \
                     .head(20)
@@ -382,7 +379,7 @@ if __name__ == '__main__':
     parser.add_argument('--encode_fn_type', type=str, default='input')
     parser.add_argument('--clustering_fn', type=str, default='cl=kmeans_nc=100')
     parser.add_argument("--normalize_embeddings", action='store_true', default=False)
-    parser.add_argument("--first_N", action=int, default=None)
+    parser.add_argument("--first_N", type=int, default=None)
     parser.add_argument('--save_dir', type=str, default='clustering/input/all-mpnet-base-v2/wizardlm/cl=kmeans_nc=100')
 
     args = parser.parse_args()
