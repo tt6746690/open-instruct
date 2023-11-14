@@ -1,6 +1,5 @@
 import os
 import sys
-import numpy as np
 import time
 import re
 import random
@@ -10,6 +9,9 @@ from functools import partial
 from collections import defaultdict
 import glob
 
+import scipy
+import pandas as pd
+import numpy as np
 import pickle
 from tqdm import tqdm 
 
@@ -315,157 +317,31 @@ def viz_tokenizer_outputs(outputs, tokenizer=None):
     return df
 
 
-def sort_cluster_results_by_cluster_size(Y, C, descending=True):
-    """Sort and reassign cluster labels s.t. such that 
-        lower indexed cluster center class has more points.
-        
-        ```
-        X = np.array([[1,1,1],[2,2,2],[3,3,3]])
-        Y = np.array([0,1,1])
-        C = np.array([[0,0,0],[1,1,1]])
-        Y, C = sort_cluster_results_by_cluster_size(Y, C)
-        assert(np.array_equal(Y, np.array([1,0,0])))
-        assert(np.array_equal(C, np.array([[1,1,1],[0,0,0]])))
-        classes, class_counts = np.unique(Y, return_counts=True)
-        assert(sorted(class_counts, reverse=True) == list(class_counts))
-        ```
-    """
-    # Get the unique cluster labels and their counts
-    classes, class_counts = np.unique(Y, return_counts=True)
-    inds = np.argsort(class_counts)
-    if descending:
-        inds = inds[::-1]
-    classes = classes[inds]
+def chat_completion_openai(
+    messages,
+    model='gpt-3.5-turbo-1106',
+    temperature=0,
+    max_tokens=256,
+    ):
 
-    Y_sorted = np.zeros_like(Y)
-    C_sorted = np.zeros_like(C)
-    for class_new, class_old in enumerate(classes):
-        Y_sorted[Y == class_old] = class_new
-        C_sorted[class_new] = C[class_old]
-        
-    return Y_sorted, C_sorted
-
-
-
-def pairwise_cosine_similarity(a, b, eps=1e-8):
-    """Compute cosine similarity 
-        a (N, D)
-        b (M, D)
-        Returns (N, M)
-    """
-    if a.ndim == 1:
-        a = a.reshape(1, -1)
-    if b.ndim == 1:
-        b = b.reshape(1, -1)
-    a_norm = a.norm(dim=1)[:,None]
-    b_norm = b.norm(dim=1)[:,None]
-    a_norm = a / torch.max(a_norm, eps * torch.ones_like(a_norm))
-    b_norm = b / torch.max(b_norm, eps * torch.ones_like(b_norm))
-    S = torch.mm(a_norm, b_norm.transpose(0, 1))
-    return S
-
-
-def pairwise_cosine_distance(a, b, eps=1e-8):
-    """Compute cosine distance = 1 - cosine_similarity
-        a (N, D)
-        b (M, D)
-        Returns (N, M)
-    """
-    return 1 - pairwise_cosine_similarity(a, b, eps=eps)
-    
-
-
-def clustering_dist_to_centroids(X, Y, C, device='cuda', dist='cd'):
-    """Compute distances of each point to their centroid.
-
-    each cluster
-    cluster size, mean/std of distance to centroids
-
-    each point
-    cluster assignment, distance to centroid, 
-    """
-    n_clusters = C.shape[0]
-
-    if X.shape[0]!=Y.shape[0]:
-        raise ValueError('Each data point should have a cluster assignment')
-
-    if dist == 'cd':
-        dist_fn = pairwise_cosine_distance
-    elif dist == 'l2':
-        dist_fn = lambda x1, x2: torch.cdist(x1, x2, p=2.0)
-    else:
-        raise ValueError(f'dist_fn={dist_fn} not supported.')
-
-    # faster processing on gpu
-    X = torch.from_numpy(X).float().to(device)
-    C = torch.from_numpy(C).float().to(device)
-    Y = torch.from_numpy(Y).float().to(device)
-
-    D = torch.zeros_like(Y)
-    for i in range(n_clusters):
-        mask = (Y==i)
-        C_i = C[i]
-        X_i = X[mask]
-        C_i = C_i.reshape(1, -1) if C_i.ndim==1 else C_i
-        D_i = dist_fn(C_i, X_i).squeeze()
-        D[mask] = D_i
-    D = D.to('cpu').tolist()
-    return D
-
-
-def clustering_algorithm_scores(X, Y):
-    import sklearn
-    from functools import partial
-
-    sample_size = min(10_000, len(X))
-    scores_fn = {
-        'silhouette_score_cd': partial(sklearn.metrics.silhouette_score, metric='cosine', sample_size=sample_size, random_state=0),
-        'silhouette_score_l2': partial(sklearn.metrics.silhouette_score, metric='euclidean', sample_size=sample_size, random_state=0),
-        'variance_ratio': sklearn.metrics.calinski_harabasz_score,
-        'davies_bouldin_index': sklearn.metrics.davies_bouldin_score,
-    }
-
-    scores = {}
-    for k, fn in scores_fn.items():
-        scores[k] = fn(X, Y)
-
-    return scores
-
-
-def clustering_run(run_name, X):
-    import sklearn
-
-    match = re.search(r'cl=([^_]+)', run_name)
-    clustering_algo = match.group(1)
-    match = re.search(r'nc=([^_]+)', run_name)
-    n_clusters = int(match.group(1))
-
-    if clustering_algo.startswith('kmeans'):
-        if clustering_algo == 'kmeans':
-            clustering_model = sklearn.cluster.KMeans(
-                n_clusters=n_clusters,
-                init='k-means++',
-                n_init="auto",
-                random_state=0,
-                verbose=True,
+    import openai
+    output = {}
+    for _ in range(16):
+        try:
+            response = openai.ChatCompletion.create(
+                model=model,
+                messages=messages,
+                n=1,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
-        elif clustering_algo == 'kmeansminibatch':
-            match = re.search(r'bsz=([^_]+)', run_name)
-            batch_size = int(match.group(1)) if match else 1024
-            clustering_model = sklearn.cluster.MiniBatchKMeans(
-                n_clusters=n_clusters,
-                init='k-means++',
-                n_init="auto",
-                random_state=0,
-                verbose=True,
-                batch_size=batch_size,
-                max_no_improvement=100,
-                reassignment_ratio=1e-4,
-            )
-        clustering_model.fit(X)
-        Y = clustering_model.labels_
-        C = clustering_model.cluster_centers_
-    else:
-        raise ValueError(f'clustering_algo={clustering_algo} not implemented.')
-    
-    return Y, C, clustering_model
+            output['completion'] = response['choices'][0]['message']['content']
+            output['usage'] = {'prompt_tokens': response['usage']['prompt_tokens'],
+                               'completion_tokens': response['usage']['completion_tokens'],
+                               'total_tokens': response['usage']['total_tokens'],}
+            break
+        except openai.error.OpenAIError as e:
+            print(type(e), e)
+            time.sleep(10)
+
+    return response

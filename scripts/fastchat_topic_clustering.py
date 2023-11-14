@@ -223,6 +223,7 @@ def chat_completion_openai(
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            # output = response["choices"][0]["message"]["content"]
             break
         except openai.error.OpenAIError as e:
             print(type(e), e)
