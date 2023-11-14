@@ -23,7 +23,28 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
-from note_pruning_analysis import encode_just_one_role
+
+
+def encode_just_one_role(example, tokenizer, max_seq_length, encode_fn_type):
+    messages = example['messages']
+    assert(len(messages) == 2)
+    
+    if encode_fn_type == 'input':
+        text = messages[0]['content']
+    elif encode_fn_type == 'output':
+        text = messages[1]['content']
+    else:
+        raise ValueError(f'encode_fn_type={encode_fn_type} not supported.')
+    tokenized_example = tokenizer(
+        text, return_tensors='pt', max_length=max_seq_length, truncation=True)
+    input_ids = tokenized_example.input_ids
+    attention_mask = tokenized_example.attention_mask
+    labels = input_ids.clone()
+    
+    return {'text': text,
+            'input_ids': input_ids.flatten(),
+            'labels': labels.flatten(),
+            'attention_mask': attention_mask.flatten()}
 
 
 def sklearn_rp_mat_size(rp):

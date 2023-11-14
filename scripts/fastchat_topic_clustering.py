@@ -223,15 +223,17 @@ def chat_completion_openai(
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            output = response["choices"][0]["message"]["content"]
             break
         except openai.error.OpenAIError as e:
             print(type(e), e)
             time.sleep(10)
 
-    return output
+    return response
 
 
+def truncate_string(s, l):
+    half = int(l // 2)
+    return s[:half] + s[-half:] if len(s) > l else s
 
 
 def summarize_cluster():
