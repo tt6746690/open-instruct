@@ -255,6 +255,13 @@ def semdedup(X, Y, dist='cd', device='cuda'):
     return S
 
 
+def sklearn_compute_inertia_dense(X, Y, C):
+    from sklearn.cluster._k_means_common import _inertia_dense
+    return _inertia_dense(X=X, 
+                          sample_weight=np.full(len(X), 1., dtype=np.float32), 
+                          centers=C, 
+                          labels=Y.squeeze().astype(np.int32),
+                          n_threads=1)
 
 
 def clustering_run(run_name, X):
@@ -265,38 +272,61 @@ def clustering_run(run_name, X):
     match = re.search(r'nc=([^_]+)', run_name)
     n_clusters = int(match.group(1))
 
-    if clustering_algo.startswith('kmeans'):
-        if clustering_algo == 'kmeans':
-            clustering_model = KMeans(
-                n_clusters=n_clusters,
-                init='k-means++',
-                n_init="auto",
-                random_state=0,
-                verbose=True,
-            )
-        elif clustering_algo == 'kmeansminibatch':
-            match = re.search(r'bsz=([^_]+)', run_name)
-            batch_size = int(match.group(1)) if match else 1024
-            clustering_model = MiniBatchKMeans(
-                n_clusters=n_clusters,
-                init='k-means++',
-                n_init="auto",
-                random_state=0,
-                verbose=True,
-                batch_size=batch_size,
-                max_no_improvement=100,
-                reassignment_ratio=1e-4,
-            )
+    if clustering_algo == 'kmeans':
+        clustering_model = KMeans(
+            n_clusters=n_clusters,
+            init='k-means++',
+            n_init="auto",
+            random_state=0,
+            verbose=True,
+        )
         clustering_model.fit(X)
         Y = clustering_model.labels_
         C = clustering_model.cluster_centers_
+    elif clustering_algo == 'kmeansminibatch':
+        match = re.search(r'bsz=([^_]+)', run_name)
+        batch_size = int(match.group(1)) if match else 1024
+        clustering_model = MiniBatchKMeans(
+            n_clusters=n_clusters,
+            init='k-means++',
+            n_init="auto",
+            random_state=0,
+            verbose=True,
+            batch_size=batch_size,
+            max_no_improvement=100,
+            reassignment_ratio=1e-4,
+        )
+        clustering_model.fit(X)
+        Y = clustering_model.labels_
+        C = clustering_model.cluster_centers_
+    elif clustering_algo.startswith('kmeansfaiss'): # [kmeansfaissl2, kmeansfaisscd]
+        from llm.submit import get_host_info
+        arch = get_host_info()['arch']
+        if arch == 'x86_64': 
+            import faiss
+        else:
+            raise ValueError(f'Cannot run faiss on {arch}')
+        assert(clustering_algo in ['kmeansfaissl2', 'kmeansfaisscd'])
+        dist = clustering_algo.replace('kmeansfaiss', '')
+        kmeans = faiss.Kmeans(
+            d=X.shape[1],
+            k=n_clusters,
+            spherical=(dist=='cd'),
+            niter=30,
+            verbose=True,
+            seed=0)
+        kmeans.train(X)
+        C = kmeans.centroids
+        _, Y = kmeans.index.search(X, 1)
     else:
         raise ValueError(f'clustering_algo={clustering_algo} not implemented.')
     
+    Y = Y.squeeze()
+
     ## sort by decreasing cluster size by default
     Y, C = clustering_sort_by_cluster_size(Y, C)
     
-    return Y, C, clustering_model
+    return Y, C
 
 
 
@@ -446,7 +476,6 @@ def main(
         ds = ds.select(range(first_N))
         X = X[:first_N]
 
-
     info = {}
     info['N'] = len(X)
     info['dataset'] = 'dataset'
@@ -455,10 +484,10 @@ def main(
     info['clustering_fn'] = clustering_fn
 
     t0 = time.time()
-    Y, C, clustering_model = clustering_run(clustering_fn, X)
+    Y, C = clustering_run(clustering_fn, X)
     info['time_elapsed'] = time.time()-t0
     info['scores'] = {}
-    info['scores'].update({'inertia': clustering_model.inertia_})
+    info['scores'].update({'inertia': sklearn_compute_inertia_dense(X, Y, C)})
     info['scores'].update(clustering_algorithm_scores(X, Y))
     info['cluster_sizes'] = np.unique(Y, return_counts=True)[1].tolist()
 
@@ -466,6 +495,7 @@ def main(
         json.dump(info, f, ensure_ascii=False, indent=4)
 
     clustering_compute_and_save_results(X, Y, C, ds=ds, save_dir=save_dir)
+
 
 
 
