@@ -104,15 +104,14 @@ def clustering_dist_to_centroids(X, Y, C, dist='cd', device='cuda'):
         raise ValueError(f'dist_fn={dist_fn} not supported.')
 
     # faster processing on gpu
-    X = torch.from_numpy(X).float().to(device)
+    X = torch.from_numpy(X).float()
     C = torch.from_numpy(C).float().to(device)
-    # Y = torch.from_numpy(Y).float().to(device)
 
     D = torch.zeros(X.shape[0])
     for i in range(n_clusters):
         mask = (Y==i)
         C_i = C[i]
-        X_i = X[mask]
+        X_i = X[mask].to(device)
         C_i = C_i.reshape(1, -1) if C_i.ndim==1 else C_i
         D_i = dist_fn(C_i, X_i).squeeze()
         D[mask] = D_i.to('cpu')
@@ -134,18 +133,18 @@ def clustering_knn_withincluster(X, Y, k=5, dist='cd', device='cuda'):
     else:
         raise ValueError(f'dist_fn={dist_fn} not supported.')
     
-    X = torch.from_numpy(X).float().to(device)
+    X = torch.from_numpy(X).float()
     Y = torch.from_numpy(Y)
 
-    # indices of k-nearest neighbors
+    # indices & distances of k-nearest neighbors
     I = torch.zeros(X.shape[0], k, dtype=torch.int64)
-    # distance to k-nearest neighbors
     D = torch.zeros(X.shape[0], k, dtype=torch.float32)
     for i in clusters:
         mask = (Y==i)
         inds_global = torch.nonzero(mask).squeeze()
-        Xi = X[mask]
+        Xi = X[mask].to(device)
         Di = dist_fn(Xi, Xi)
+        del Xi
         values, indices = torch.topk(Di, k + 1, largest=False, dim=1)
         I[mask] = inds_global[indices[:,1:].to('cpu')]
         D[mask] = values[:,1:].to('cpu')
@@ -217,28 +216,6 @@ def clustering_run(run_name, X):
 
 
 
-def flatten_dict(d, parent_key='', sep='_'):
-    """
-    Flatten a nested dictionary.
-
-    Parameters:
-    - d: The input dictionary.
-    - parent_key: Used for recursion to keep track of the parent keys.
-    - sep: Separator used to concatenate keys.
-
-    Returns:
-    A flattened dictionary.
-    """
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(flatten_dict(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
-
-
 
 def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
     """
@@ -283,18 +260,21 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
                 {
                     'cluster': i,
                     'cluster_size': count,
-                    'examples': [{'text': ds[ind]['text'], f'cent_dist_{dist}': x}
-                         for ind, x in zip(dfi['data_ind'].to_list(), dfi[f'cent_dist_{dist}'].to_list())]
+                    'examples': [{'text': ds[ind]['text'], 
+                                  f'cent_dist_{dist}': x, 
+                                  'ind': ind}
+                         for ind, x in zip(dfi['data_ind'].to_list(),
+                                           dfi[f'cent_dist_{dist}'].to_list())]
                 }
             )
 
-        with open(os.path.join(save_dir, f"text_clusterwise_topk_dist={dist}.json"), 'w') as f:
+        with open(os.path.join(save_dir, f"text_cent_topk_dist={dist}.json"), 'w') as f:
             json.dump(output, f, ensure_ascii=False, indent=4)
 
     ## visualize text with similar embeddings
 
     n_examples_per_cluster = 5
-    k_neighbors = 3
+    k_neighbors = 2
 
     for dist in ['l2', 'cd']:
 
@@ -308,12 +288,47 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
                 {
                     'cluster': i,
                     'cluster_size': count,
-                    'examples': [{'text': ds[ind]['text'], f'knn_dist_{dist}': v}
-                                for ind, v in zip(inds[:k_neighbors], vals[:k_neighbors])]
+                    'examples': [{'text': ds[ind]['text'], 
+                                  f'knn_dist_{dist}': v,
+                                  'ind': ind}
+                                for ind, v in zip(inds[:1+k_neighbors], 
+                                                  vals[:1+k_neighbors])]
                 } for inds, vals in ID
             ]
 
-        with open(os.path.join(save_dir, f'text_knn_dist={dist}.json'), 'w') as f:
+        with open(os.path.join(save_dir, f'text_knn_clusterwise_dist={dist}.json'), 'w') as f:
+            json.dump(output, f, ensure_ascii=False, indent=4)
+
+    ## visualize examples with very close neighbors
+
+    closest_pct = .2
+    num_examples = 100
+    k_neighbors = 2
+
+    for dist in ['l2', 'cd']:
+
+        sort_by_1nn_dist = lambda x: x.apply(lambda y: y[0])
+        dfs = df.sort_values(by=f'knn_dist_{dist}', key=sort_by_1nn_dist) \
+                .head(int(closest_pct*len(df))) \
+                .sample(n=num_examples, random_state=0) \
+                .sort_values(by=f'knn_dist_{dist}', key=sort_by_1nn_dist)
+        
+        ID = [([a]+b,[0]+c) for a, b, c in zip(dfs['data_ind'].tolist(),
+                                            dfs[f'knn_inds_{dist}'].tolist(),
+                                            dfs[f'knn_dist_{dist}'].tolist(),)]
+        output = [
+            {
+                'cluster': i,
+                'cluster_size': count,
+                'examples': [{'text': ds[ind]['text'], 
+                            f'knn_dist_{dist}': v,
+                            f'ind': ind}
+                            for ind, v in zip(inds[:1+k_neighbors], 
+                                            vals[:1+k_neighbors])]
+            } for inds, vals in ID
+        ]
+
+        with open(os.path.join(save_dir, f'text_knn_closest_dist={dist}.json'), 'w') as f:
             json.dump(output, f, ensure_ascii=False, indent=4)
 
 
@@ -354,6 +369,7 @@ def main(
     info['dataset'] = 'dataset'
     info['model_name'] = model_name
     info['encode_fn_type'] = encode_fn_type
+    info['clustering_fn'] = clustering_fn
 
     t0 = time.time()
     Y, C, clustering_model = clustering_run(clustering_fn, X)

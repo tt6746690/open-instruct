@@ -182,6 +182,21 @@ def get_prune_results(path):
 
 
 
+def get_clustering_results(dataset, model_name, clustering_fn, encode_fn_type='input', return_data=False):
+    
+    save_dir = os.path.join(scripts_dir, 'clustering', encode_fn_type, model_name, dataset, clustering_fn)
+
+    d = {}
+    with open(os.path.join(save_dir, 'info.json'), 'r') as f:
+        d['info'] = json.load(f)
+
+    if return_data:
+        with open(os.path.join(save_dir, 'data.pkl'), 'rb') as f:
+            d['data'] = pickle.load(f)
+    return d
+
+
+
 def compute_correlations(xs, ys, corr_type='pearsonr'):
     xs = xs.squeeze()
     ys = ys.squeeze()
@@ -345,3 +360,26 @@ def chat_completion_openai(
             time.sleep(10)
 
     return response
+
+
+
+def flatten_dict(d, parent_key='', sep='_'):
+    """
+    Flatten a nested dictionary.
+
+    Parameters:
+    - d: The input dictionary.
+    - parent_key: Used for recursion to keep track of the parent keys.
+    - sep: Separator used to concatenate keys.
+
+    Returns:
+    A flattened dictionary.
+    """
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
