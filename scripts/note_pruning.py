@@ -207,11 +207,11 @@ def save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, datase
             save_to_pickle(save_path=save_path, output=output)
 
 
-def prune_data(dataset, sort_by, save_dir, model_name, test_run):
+def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
 
     from note_pruning_analysis import get_lm_output
 
-    d = get_lm_output(dataset, model_name, return_text_embedding=True)
+    d = get_lm_output(dataset, model_name, encode_fn_type=encode_fn_type, return_text_embedding=True)
     if test_run:
         d = {k: v[:1000] for k, v in d.items()}
         
@@ -251,6 +251,61 @@ def prune_data(dataset, sort_by, save_dir, model_name, test_run):
         print(f'Running kmeans(n_clusters={n_clusters}) {{ {embed_type} }} to compute {"euclidean" if dist_fn == "l2" else "cosine"} distance to cluster centers.')
         S, kms = sort_kmeans_dist_to_cluster_centers(emb, n_clusters, dist_fn=dist_fn)
         pkl_extra['kmeans'] = kms
+    elif sort_by.startswith('semdedup'):
+        from note_pruning_analysis import get_dataset
+        from note_pruning_clustering import (
+            clustering_run, 
+            clustering_algorithm_scores, 
+            semdedup, 
+            clustering_compute_and_save_results
+        )
+        clustering_fn = sort_by.split('semdedup_')[-1]
+        match = re.search(r'dist=([^_]+)', sort_by)
+        dist = match.group(1)
+        assert(dist in ['cd', 'l2'])
+        match = re.search(r'emb=([^_]+)', sort_by)
+        embed_type = re.sub(r'[+]', '_', match.group(1))
+        if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
+            raise ValueError(f'Invalid embed_type = {embed_type}')
+        X = d[embed_type]
+        if dist == 'cd':
+            X = X / np.linalg.norm(X, axis=-1, keepdims=True)
+        
+        print(f'Running {clustering_fn} {{ {embed_type} }} to compute {"euclidean" if dist == "l2" else "cosine"} '
+            'pairwise distance in each cluster.')
+        info = {}
+        info['N'] = len(X)
+        info['dataset'] = 'dataset'
+        info['model_name'] = model_name
+        info['encode_fn_type'] = encode_fn_type
+
+        t = time.time()
+        Y, C, clustering_model = clustering_run(clustering_fn, X)
+        info['time_elapsed'] = time.time()-t
+        info['scores'] = {}
+        info['scores'].update({'inertia': clustering_model.inertia_})
+        info['scores'].update(clustering_algorithm_scores(X, Y))
+        info['cluster_sizes'] = np.unique(Y, return_counts=True)[1].tolist()
+        
+        save_dir_clustering = os.path.join('clustering', encode_fn_type, model_name, dataset, clustering_fn)
+        os.makedirs(save_dir_clustering, exist_ok=True)
+        with open(os.path.join(save_dir_clustering, 'info.json'), 'w') as f:
+            json.dump(info, f, ensure_ascii=False, indent=4)
+        
+        ds = get_dataset(dataset, processed=True)
+        if encode_fn_type == 'input':
+            def get_user_prompt_fn(example):
+                example['text'] = example['messages'][0]['content']
+                return example
+            ds = ds.map(get_user_prompt_fn, num_proc=16)
+        else:
+            raise ValueError(f'encode_fn_type={encode_fn_type} not supported.')
+        clustering_compute_and_save_results(X, Y, C, ds=ds, save_dir=save_dir_clustering)
+
+        Y, C, clustering_model = clustering_run(clustering_fn, X)
+        print('Apply SemDeDup to discard duplicates.')
+        S = semdedup(X, Y, dist=dist, device='cuda')
+        pkl_extra['clustering_model'] = clustering_model
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None
@@ -263,7 +318,7 @@ def prune_data(dataset, sort_by, save_dir, model_name, test_run):
     elif sort_by.startswith('rho'):
         if sort_by == 'rhov1':
             model_names = ['mistral-7b+lora:r=256:a=256',
-                        'mistral-7b-ultrachat200k-v1+lora:r=256:a=256']
+                           'mistral-7b-ultrachat200k-v1+lora:r=256:a=256']
             assert(model_name == model_names[0])
         else:
             raise ValueError(f'sort_by={sort_by} not implemented.')
@@ -318,6 +373,7 @@ if __name__ == '__main__':
     parser.add_argument("--sort_by", type=str, default="prob")
     parser.add_argument("--model_name", type=str, default="llama-7b")
     parser.add_argument("--save_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data_inds/")
+    parser.add_argument("--encode_fn_type", type=str, default="sft")
     parser.add_argument("--test_run", action='store_true', default=False)
     args = parser.parse_args()
 
@@ -326,4 +382,4 @@ if __name__ == '__main__':
     # args.save_dir = os.path.join(args.save_dir, args.model_name, args.dataset)
     os.makedirs(args.save_dir, exist_ok=True)
 
-    prune_data(**vars(args))
+    main(**vars(args))

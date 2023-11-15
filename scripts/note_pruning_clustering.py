@@ -81,6 +81,14 @@ def pairwise_cosine_distance(a, b, eps=1e-8):
     return 1 - pairwise_cosine_similarity(a, b, eps=eps)
     
 
+def get_dist_fn(dist):
+    if dist == 'cd':
+        return pairwise_cosine_distance
+    elif dist == 'l2':
+        return lambda x1, x2: torch.cdist(x1, x2, p=2.0)
+    else:
+        raise ValueError(f'dist_fn={dist} not supported.')
+
 
 def clustering_dist_to_centroids(X, Y, C, dist='cd', device='cuda'):
     """Compute distances of each point to their centroid.
@@ -96,12 +104,7 @@ def clustering_dist_to_centroids(X, Y, C, dist='cd', device='cuda'):
     if X.shape[0]!=Y.shape[0]:
         raise ValueError('Each data point should have a cluster assignment')
 
-    if dist == 'cd':
-        dist_fn = pairwise_cosine_distance
-    elif dist == 'l2':
-        dist_fn = lambda x1, x2: torch.cdist(x1, x2, p=2.0)
-    else:
-        raise ValueError(f'dist_fn={dist_fn} not supported.')
+    dist_fn = get_dist_fn(dist)
 
     # faster processing on gpu
     X = torch.from_numpy(X).float()
@@ -110,11 +113,11 @@ def clustering_dist_to_centroids(X, Y, C, dist='cd', device='cuda'):
     D = torch.zeros(X.shape[0])
     for i in range(n_clusters):
         mask = (Y==i)
-        C_i = C[i]
-        X_i = X[mask].to(device)
-        C_i = C_i.reshape(1, -1) if C_i.ndim==1 else C_i
-        D_i = dist_fn(C_i, X_i).squeeze()
-        D[mask] = D_i.to('cpu')
+        Ci = C[i]
+        Xi = X[mask].to(device, non_blocking=True)
+        Ci = Ci.reshape(1, -1) if Ci.ndim==1 else Ci
+        Di = dist_fn(Ci, Xi).squeeze()
+        D[mask] = Di.to('cpu')
     D = D.tolist()
     return D
 
@@ -126,13 +129,8 @@ def clustering_knn_withincluster(X, Y, k=5, dist='cd', device='cuda'):
 
     clusters = sorted(list(np.unique(Y)))
 
-    if dist == 'cd':
-        dist_fn = pairwise_cosine_distance
-    elif dist == 'l2':
-        dist_fn = lambda x1, x2: torch.cdist(x1, x2, p=2.0)
-    else:
-        raise ValueError(f'dist_fn={dist_fn} not supported.')
-    
+    dist_fn = get_dist_fn(dist)
+
     X = torch.from_numpy(X).float()
     Y = torch.from_numpy(Y)
 
@@ -142,7 +140,7 @@ def clustering_knn_withincluster(X, Y, k=5, dist='cd', device='cuda'):
     for i in clusters:
         mask = (Y==i)
         inds_global = torch.nonzero(mask).squeeze()
-        Xi = X[mask].to(device)
+        Xi = X[mask].to(device, non_blocking=True)
         Di = dist_fn(Xi, Xi)
         del Xi
         values, indices = torch.topk(Di, k + 1, largest=False, dim=1)
@@ -171,6 +169,80 @@ def clustering_algorithm_scores(X, Y):
         scores[k] = float(fn(X, Y))
 
     return scores
+
+
+
+def bisect_eps(fn, target_size, eps_low, eps_high, tol=1e-8):
+    while eps_high - eps_low > tol:
+        eps_mid = (eps_low + eps_high) / 2
+        subset_size_at_eps = len(fn(eps_mid))
+        if subset_size_at_eps < target_size:
+            eps_high = eps_mid
+        elif subset_size_at_eps > target_size:
+            eps_low = eps_mid
+        else:
+            return eps_mid
+    return (eps_low + eps_high) / 2
+
+
+
+def semdedup(X, Y, dist='cd', device='cuda'):
+    """Implements SemDeDup
+
+        - https://arxiv.org/pdf/2303.09540.pdf
+        - https://github.com/facebookresearch/SemDeDup/blob/main/semdedup.py
+    """
+
+    clusters = sorted(list(np.unique(Y)))
+    X = torch.from_numpy(X).float()
+    dist_fn = get_dist_fn(dist)
+
+    Ds = [] # min distance to closest neighbor
+    Is = []
+    eps_low, eps_high = float('inf'), 0
+    for i in clusters:
+        mask = (Y==i)
+        inds_global = torch.nonzero(torch.from_numpy(mask)).squeeze()
+        Xi = X[mask].to(device, non_blocking=True)
+        Di = dist_fn(Xi, Xi)
+        eps_low = min(eps_low, Di.min().item())
+        eps_high = max(eps_high, Di.max().item())
+        Di.fill_diagonal_(0.0)
+        Di_triu = torch.triu(Di, diagonal=1)
+        Di_triu[torch.tril(torch.ones_like(Di_triu)).bool()] = float('inf')
+        D = torch.min(Di_triu, dim=0)[0]
+        D = D.to('cpu')
+        Ds.append(D)
+        Is.append(inds_global)
+        
+    D = torch.hstack(Ds)
+    I = torch.hstack(Is)
+        
+    def find_subset(eps):
+        return I[torch.nonzero(D >= eps).reshape(-1)].tolist()
+
+    eps_list = []
+    eps_list += np.linspace(eps_low, eps_high, 100).tolist()
+    ys = np.array(D.tolist())
+    np.random.seed(0)
+    eps_list += np.random.choice(ys[~np.isinf(ys)], size=1000).tolist()
+    eps_list = sorted(eps_list)
+
+    inds_list = []
+    for eps in eps_list:
+        inds_list.append(find_subset(eps))
+        
+    # points with close-by neighbors will have a smaller score
+    S = np.zeros(Y.shape[0])
+    for inds in inds_list:
+        S[inds] += 1
+
+    l = np.array([len(x) for x in inds_list])
+    print(f'brute force compute scores for semdedup. max step length = {max(np.abs(l[:-1]-l[1:]))}')
+
+    return S
+
+
 
 
 def clustering_run(run_name, X):
