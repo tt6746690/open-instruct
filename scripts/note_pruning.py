@@ -278,6 +278,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         info['dataset'] = 'dataset'
         info['model_name'] = model_name
         info['encode_fn_type'] = encode_fn_type
+        info['clustering_fn'] = clustering_fn
 
         t = time.time()
         Y, C, clustering_model = clustering_run(clustering_fn, X)

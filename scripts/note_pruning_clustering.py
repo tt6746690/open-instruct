@@ -142,11 +142,23 @@ def clustering_knn_withincluster(X, Y, k=5, dist='cd', device='cuda'):
         inds_global = torch.nonzero(mask).squeeze()
         Xi = X[mask].to(device, non_blocking=True)
         Di = dist_fn(Xi, Xi)
-        del Xi
-        values, indices = torch.topk(Di, k + 1, largest=False, dim=1)
-        I[mask] = inds_global[indices[:,1:].to('cpu')]
-        D[mask] = values[:,1:].to('cpu')
-
+        s = Di.shape[0] # cluster size
+        # when cluster size is smaller than k neighbors
+        # assign `-100` to index and `nan` to distance.
+        if k+1 > s: 
+            values, indices = torch.topk(Di, s, largest=False, dim=1)
+            Ii = torch.full((s, k+1-s), -100)
+            Vi = torch.full((s, k+1-s), float('nan'))
+            if s!=1:
+                Ii = torch.hstack((inds_global[indices[:,1:].to('cpu')], Ii))
+                Vi = torch.hstack((values[:,1:].to('cpu'), Vi))
+        else:
+            values, indices = torch.topk(Di, k + 1, largest=False, dim=1)
+            Ii = inds_global[indices[:,1:].to('cpu')]
+            Vi = values[:,1:].to('cpu')
+        I[mask] = Ii
+        D[mask] = Vi
+            
     X = X.to('cpu')
     I = I.tolist()
     D = D.tolist()
@@ -344,7 +356,6 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
             json.dump(output, f, ensure_ascii=False, indent=4)
 
     ## visualize text with similar embeddings
-
     n_examples_per_cluster = 5
     k_neighbors = 2
 
@@ -355,7 +366,7 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
             dfi = df[df['cluster_assignment']==i]
             dfi = dfi.sample(n=min(n_examples_per_cluster, len(dfi)), random_state=0)
             ID = dfi.apply(lambda row: ([row['data_ind']]+row[f'knn_inds_{dist}'],
-                                         [0]+row[f'knn_dist_{dist}'],), axis=1).tolist()
+                                        [0]+row[f'knn_dist_{dist}'],), axis=1).tolist()
             output += [
                 {
                     'cluster': i,
@@ -364,15 +375,15 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
                                   f'knn_dist_{dist}': v,
                                   'ind': ind}
                                 for ind, v in zip(inds[:1+k_neighbors], 
-                                                  vals[:1+k_neighbors])]
+                                                vals[:1+k_neighbors]) if ind >= 0]
                 } for inds, vals in ID
             ]
 
         with open(os.path.join(save_dir, f'text_knn_clusterwise_dist={dist}.json'), 'w') as f:
             json.dump(output, f, ensure_ascii=False, indent=4)
 
-    ## visualize examples with very close neighbors
 
+    ## visualize examples with very close neighbors
     closest_pct = .2
     num_examples = 100
     k_neighbors = 2
@@ -386,17 +397,17 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
                 .sort_values(by=f'knn_dist_{dist}', key=sort_by_1nn_dist)
         
         ID = [([a]+b,[0]+c) for a, b, c in zip(dfs['data_ind'].tolist(),
-                                            dfs[f'knn_inds_{dist}'].tolist(),
-                                            dfs[f'knn_dist_{dist}'].tolist(),)]
+                                               dfs[f'knn_inds_{dist}'].tolist(),
+                                               dfs[f'knn_dist_{dist}'].tolist(),)]
         output = [
             {
                 'cluster': i,
                 'cluster_size': count,
                 'examples': [{'text': ds[ind]['text'], 
-                            f'knn_dist_{dist}': v,
-                            f'ind': ind}
+                              f'knn_dist_{dist}': v,
+                              f'ind': ind}
                             for ind, v in zip(inds[:1+k_neighbors], 
-                                            vals[:1+k_neighbors])]
+                                              vals[:1+k_neighbors]) if ind >= 0]
             } for inds, vals in ID
         ]
 
