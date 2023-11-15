@@ -369,6 +369,7 @@ def compute_lm_outputs(
         grad_randproj_components=2048,
         max_seq_len=2048,
         encode_fn_type='sft',
+        text_pooling_type='meanpool',
     ):
     """
         `shuffle` to allow each process to process roughly similar workload cross the dataset 
@@ -552,7 +553,12 @@ def compute_lm_outputs(
         
         # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
         last_hidden_state = outputs['hidden_states'][-1]
-        text_embedding = mean_pooling(last_hidden_state, batch['attention_mask'])
+        if text_pooling_type == 'meanpool':
+            text_embedding = mean_pooling(last_hidden_state, batch['attention_mask'])
+        elif text_pooling_type == 'cls':
+            text_embedding = last_hidden_state[:, 0]
+        else:
+            raise ValueError(f'text_pooling_type={text_pooling_type} not supported.')
         output['text_embedding'].append(text_embedding.to(torch.float32).detach().cpu())
 
         if compute_loss:
@@ -658,7 +664,8 @@ if __name__ == "__main__":
         --compute_grad_embeddings \
         --grad_randproj_components 2048 \
         --max_seq_len 2048 \
-        --encode_fn_type sft
+        --encode_fn_type sft \
+        --text_pooling_type meanpool
     """
 
     import argparse
@@ -678,6 +685,7 @@ if __name__ == "__main__":
     parser.add_argument("--grad_randproj_components", type=int, default=2048)
     parser.add_argument("--max_seq_len", type=int, default=2048)
     parser.add_argument("--encode_fn_type", type=str, default='sft')
+    parser.add_argument("--text_pooling_type", type=str, default="meanpool")
 
 
 
