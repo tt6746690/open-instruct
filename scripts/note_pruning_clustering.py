@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import glob
 import pickle
 import time
 
@@ -25,27 +26,28 @@ from note_pruning_analysis import (
 )
 
 
-
-
-def clustering_cmp_clustering_fn(clustering_fn_list, dataset, model_name, encode_fn_type):
+def get_clustering_info_df():
+    """Get results"""
     data = []
-    for clustering_fn in clustering_fn_list:
-        d = get_clustering_results(dataset, model_name, clustering_fn, encode_fn_type=encode_fn_type, return_data=False)
-        d = flatten_dict(d['info'])
-        for k in list(d.keys()):
-            d[k.split('scores_')[-1]] = d.pop(k)
-        d = {'n_clusters': re.search(r'nc=([^_]+)', d['clustering_fn']).group(1), **d}
-        cluster_size_statistics = {
+
+    paths = glob.glob('clustering/*/*/*/*/')
+    for path in paths:
+        with open(os.path.join(path, 'info.json'), 'r') as f:
+            d = json.load(f)
+        d.update(d.pop('scores'))
+        d = {'n_clusters': int(re.search(r'nc=([^_]+)', d['clustering_fn']).group(1)),
+            **d}
+        d.update({
             'cluster_sizes_min': int(np.min(d['cluster_sizes'])),
             'cluster_sizes_mean': int(np.mean(d['cluster_sizes'])),
             'cluster_sizes_max': int(np.max(d['cluster_sizes'])),
-        }
-        d.update(cluster_size_statistics)
+        })
+        d.pop('cluster_sizes')
         data.append(d)
-        
+
     df = pd.DataFrame(data)
-    df = df.drop(columns=['N', 'encode_fn_type', 'cluster_sizes'])
-    df = df.sort_values(['clustering_fn'])
+    df = df.sort_values(['dataset', 'model_name', 'clustering_fn', 'n_clusters'])
+    df = df.reset_index(drop=True)
 
     higher_is_better = [
         ('inertia', False),
@@ -54,11 +56,11 @@ def clustering_cmp_clustering_fn(clustering_fn_list, dataset, model_name, encode
         ('variance_ratio', True),
         ('davies_bouldin_index', False),
     ]
-
-    df = df.rename(columns={k: k+('$\\uparrow$' if v else '$\\downarrow$') for k, v in higher_is_better})
+    df = df.rename(columns={k: ('$\\text{'+k+'}\\uparrow$' if v else '$\\text{'+k+'}\\downarrow$') 
+                            for k, v in higher_is_better})
     df = df.round(3)
-
     return df
+
 
 
 
@@ -544,7 +546,7 @@ def main(
 
     info = {}
     info['N'] = len(X)
-    info['dataset'] = 'dataset'
+    info['dataset'] = dataset
     info['model_name'] = model_name
     info['encode_fn_type'] = encode_fn_type
     info['clustering_fn'] = clustering_fn
@@ -564,6 +566,7 @@ def main(
     with open(os.path.join(save_dir, 'info.json'), 'w') as f:
         json.dump(info, f, ensure_ascii=False, indent=4)
 
+    return X, Y, C
 
 
 
