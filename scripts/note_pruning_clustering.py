@@ -4,10 +4,11 @@ import json
 import pickle
 import time
 
-import numpy as np
 import scipy
+import numpy as np
 import pandas as pd
 import sklearn
+import matplotlib.pyplot as plt
 
 import pyarrow
 import torch
@@ -17,9 +18,48 @@ from functools import partial
 
 
 from note_pruning_analysis import (
+    flatten_dict,
     get_lm_output,
     get_dataset,
+    get_clustering_results,
 )
+
+
+
+
+def clustering_cmp_clustering_fn(clustering_fn_list, dataset, model_name, encode_fn_type):
+    data = []
+    for clustering_fn in clustering_fn_list:
+        d = get_clustering_results(dataset, model_name, clustering_fn, encode_fn_type=encode_fn_type, return_data=False)
+        d = flatten_dict(d['info'])
+        for k in list(d.keys()):
+            d[k.split('scores_')[-1]] = d.pop(k)
+        d = {'n_clusters': re.search(r'nc=([^_]+)', d['clustering_fn']).group(1), **d}
+        cluster_size_statistics = {
+            'cluster_sizes_min': int(np.min(d['cluster_sizes'])),
+            'cluster_sizes_mean': int(np.mean(d['cluster_sizes'])),
+            'cluster_sizes_max': int(np.max(d['cluster_sizes'])),
+        }
+        d.update(cluster_size_statistics)
+        data.append(d)
+        
+    df = pd.DataFrame(data)
+    df = df.drop(columns=['N', 'encode_fn_type', 'cluster_sizes'])
+    df = df.sort_values(['clustering_fn'])
+
+    higher_is_better = [
+        ('inertia', False),
+        ('silhouette_score_cd', True),
+        ('silhouette_score_l2', True),
+        ('variance_ratio', True),
+        ('davies_bouldin_index', False),
+    ]
+
+    df = df.rename(columns={k: k+('$\\uparrow$' if v else '$\\downarrow$') for k, v in higher_is_better})
+    df = df.round(3)
+
+    return df
+
 
 
 def clustering_sort_by_cluster_size(Y, C, descending=True):
@@ -350,10 +390,6 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
 
     df = pd.DataFrame(data)
 
-    cent_dist_l2_vs_cd_spearmanr = float(scipy.stats.spearmanr(
-        df['cent_dist_l2'].to_numpy(), df['cent_dist_cd'].to_numpy()).statistic)
-    print(f'cent_dist_l2_vs_cd_spearmanr: {cent_dist_l2_vs_cd_spearmanr}')
-
     with open(os.path.join(save_dir, 'data.pkl'), 'wb') as f:
         output = {'df': df, 'C': C, 'Y': Y}
         pickle.dump(output, f)
@@ -425,26 +461,44 @@ def clustering_compute_and_save_results(X, Y, C, ds, save_dir):
                 .head(int(closest_pct*len(df))) \
                 .sample(n=num_examples, random_state=0) \
                 .sort_values(by=f'knn_dist_{dist}', key=sort_by_1nn_dist)
-        
-        ID = [([a]+b,[0]+c) for a, b, c in zip(dfs['data_ind'].tolist(),
-                                               dfs[f'knn_inds_{dist}'].tolist(),
-                                               dfs[f'knn_dist_{dist}'].tolist(),)]
+                
+        ID = [(y, [a]+b, [0]+c) for a, b, c, y in zip(dfs['data_ind'].tolist(),
+                                                     dfs[f'knn_inds_{dist}'].tolist(),
+                                                     dfs[f'knn_dist_{dist}'].tolist(),
+                                                     dfs['cluster_assignment'])]
         output = [
             {
-                'cluster': i,
-                'cluster_size': count,
+                'cluster': cluster,
                 'examples': [{'text': ds[ind]['text'], 
                               f'knn_dist_{dist}': v,
                               f'ind': ind}
                             for ind, v in zip(inds[:1+k_neighbors], 
                                               vals[:1+k_neighbors]) if ind >= 0]
-            } for inds, vals in ID
+            } for cluster, inds, vals in ID
         ]
 
         with open(os.path.join(save_dir, f'text_knn_closest_dist={dist}.json'), 'w') as f:
             json.dump(output, f, ensure_ascii=False, indent=4)
 
+    ## plot histogram of distances to closest neighbor
 
+    fig, axs = plt.subplots(1,2,figsize=(10,5), sharey=True)
+    for i, k in enumerate(['knn_dist_l2', 'knn_dist_cd']):
+        D = np.array(df[k].tolist())
+        D = D[:,0] # closest neighbor distance
+        D = D[~np.isnan(D)]
+        ax = axs[i]
+        ax.hist(D)
+        ax.set_title(k.replace('knn', '1-nn'))
+        ax.set_xlim((D.min(), np.quantile(D, .99)))
+    fig.tight_layout()
+    save_path = os.path.join(save_dir, f'fig_knn_dist_histogram.png')
+    fig.savefig(save_path, bbox_inches='tight', dpi=100)
+    plt.close()
+
+
+
+    return df
 
 
 def main(
@@ -452,6 +506,7 @@ def main(
     dataset,
     encode_fn_type,
     clustering_fn,
+    embed_type,
     normalize_embeddings,
     first_N,
     save_dir,
@@ -463,15 +518,26 @@ def main(
             example['text'] = example['messages'][0]['content']
             return example
         ds = ds.map(get_user_prompt_fn, num_proc=16)
+    elif encode_fn_type == 'sft':
+        def combine_first_turn_conv_fn(example):
+            example['text'] = "[USER]"+" "*20+example['messages'][0]['content']+" "*20+\
+                              "[ASSISTANT]"+" "*20+example['messages'][1]['content']
+            return example
+        ds = ds.map(combine_first_turn_conv_fn, num_proc=16)
 
     d = get_lm_output(dataset, 
-                  model_name, 
-                  encode_fn_type=encode_fn_type,
-                  return_text_embedding=True,)
-    X = d['text_embedding']
-    if normalize_embeddings:
-        X = X / np.linalg.norm(X, axis=-1, keepdims=True)
+                      model_name, 
+                      encode_fn_type=encode_fn_type,
+                      return_text_embedding=True,)
 
+    if embed_type not in ['text_embedding', 'grad_rp_loraB']:
+        raise ValueError(f'embed_type={embed_type} not supported.')
+    X = d[embed_type]
+    if normalize_embeddings:
+        X = X / np.maximum(np.linalg.norm(X, axis=-1, keepdims=True), 1e-8) # possibly divide by zero.
+    nan_rows = np.isnan(X).any(-1)
+    if nan_rows.any():
+        print(f'Found {nan_rows.sum()} ({100*nan_rows.sum()/len(X)} pct) nan rows in embeddings. ')
     if first_N:
         ds = ds.select(range(first_N))
         X = X[:first_N]
@@ -489,12 +555,15 @@ def main(
     info['scores'] = {}
     info['scores'].update({'inertia': sklearn_compute_inertia_dense(X, Y, C)})
     info['scores'].update(clustering_algorithm_scores(X, Y))
+
+    df = clustering_compute_and_save_results(X, Y, C, ds=ds, save_dir=save_dir)
+    info['cent_dist_l2_vs_cd_spearmanr'] = float(scipy.stats.spearmanr(
+        df['cent_dist_l2'].to_numpy(), df['cent_dist_cd'].to_numpy()).statistic)
     info['cluster_sizes'] = np.unique(Y, return_counts=True)[1].tolist()
 
     with open(os.path.join(save_dir, 'info.json'), 'w') as f:
         json.dump(info, f, ensure_ascii=False, indent=4)
 
-    clustering_compute_and_save_results(X, Y, C, ds=ds, save_dir=save_dir)
 
 
 
@@ -507,6 +576,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', type=str, default='wizardlm')
     parser.add_argument('--encode_fn_type', type=str, default='input')
     parser.add_argument('--clustering_fn', type=str, default='cl=kmeans_nc=100')
+    parser.add_argument('--embed_type', type=str, default='text_embedding')
     parser.add_argument("--normalize_embeddings", action='store_true', default=False)
     parser.add_argument("--first_N", type=int, default=None)
     parser.add_argument('--save_dir', type=str, default='clustering/input/all-mpnet-base-v2/wizardlm/cl=kmeans_nc=100')
