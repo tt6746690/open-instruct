@@ -217,7 +217,6 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         
     # some entries are nan, impute with mean value.
     N = d['text_embedding'].shape[0]
-    log_prob = d['log_prob']
 
     pkl_extra = {}
     inds = None
@@ -252,13 +251,13 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         S, kms = sort_kmeans_dist_to_cluster_centers(emb, n_clusters, dist_fn=dist_fn)
         pkl_extra['kmeans'] = kms
     elif sort_by.startswith('semdedup'):
-        from note_pruning_analysis import get_dataset
-        from note_pruning_clustering import (
-            clustering_run, 
-            clustering_algorithm_scores, 
-            semdedup, 
-            clustering_compute_and_save_results
-        )
+        import note_pruning_clustering
+        md = re.search(r'md=([^_]+)', sort_by).group(1)
+        assert md in ['mpnet', 'bge', 'llama7b']
+        if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
+        (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
+        (md == 'llama7b' and not model_name.startswith('llama-7b')):
+            raise ValueError(f'md={md} does not match with model_name={model_name}')
         clustering_fn = sort_by.split('semdedup_')[-1]
         match = re.search(r'dist=([^_]+)', sort_by)
         dist = match.group(1)
@@ -267,46 +266,22 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         embed_type = re.sub(r'[+]', '_', match.group(1))
         if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
             raise ValueError(f'Invalid embed_type = {embed_type}')
-        X = d[embed_type]
-        if dist == 'cd':
-            X = X / np.linalg.norm(X, axis=-1, keepdims=True)
-        
-        print(f'Running {clustering_fn} {{ {embed_type} }} to compute {"euclidean" if dist == "l2" else "cosine"} '
-            'pairwise distance in each cluster.')
-        info = {}
-        info['N'] = len(X)
-        info['dataset'] = 'dataset'
-        info['model_name'] = model_name
-        info['encode_fn_type'] = encode_fn_type
-        info['clustering_fn'] = clustering_fn
-
-        t = time.time()
-        Y, C, clustering_model = clustering_run(clustering_fn, X)
-        info['time_elapsed'] = time.time()-t
-        info['scores'] = {}
-        info['scores'].update({'inertia': clustering_model.inertia_})
-        info['scores'].update(clustering_algorithm_scores(X, Y))
-        info['cluster_sizes'] = np.unique(Y, return_counts=True)[1].tolist()
-        
         save_dir_clustering = os.path.join('clustering', encode_fn_type, model_name, dataset, clustering_fn)
         os.makedirs(save_dir_clustering, exist_ok=True)
-        with open(os.path.join(save_dir_clustering, 'info.json'), 'w') as f:
-            json.dump(info, f, ensure_ascii=False, indent=4)
-        
-        ds = get_dataset(dataset, processed=True)
-        if encode_fn_type == 'input':
-            def get_user_prompt_fn(example):
-                example['text'] = example['messages'][0]['content']
-                return example
-            ds = ds.map(get_user_prompt_fn, num_proc=16)
-        else:
-            raise ValueError(f'encode_fn_type={encode_fn_type} not supported.')
-        clustering_compute_and_save_results(X, Y, C, ds=ds, save_dir=save_dir_clustering)
-
-        Y, C, clustering_model = clustering_run(clustering_fn, X)
+        kwargs = {
+            'model_name': model_name,
+            'dataset': dataset,
+            'encode_fn_type': encode_fn_type,
+            'clustering_fn': clustering_fn,
+            'embed_type': embed_type,
+            'normalize_embeddings': True if any(x in model_name for x in ['mpnet', 'bge']) else False,
+            'first_N': None,
+            'save_dir': save_dir_clustering,
+        }
+        print(f'Calling note_pruning_clustering.main with kwargs={json.dumps(kwargs, indent=4)}')
+        X, Y, C = note_pruning_clustering.main(**kwargs)
         print('Apply SemDeDup to discard duplicates.')
-        S = semdedup(X, Y, dist=dist, device='cuda')
-        pkl_extra['clustering_model'] = clustering_model
+        S = note_pruning_clustering.semdedup(X, Y, dist=dist, device='cuda')
     elif sort_by.startswith('dpp'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None
@@ -315,6 +290,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
             raise ValueError(f'Invalid embed_type = {embed_type}')
         emb = d[embed_type]
+        log_prob = d['log_prob']
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
     elif sort_by.startswith('rho'):
         if sort_by == 'rhov1':
