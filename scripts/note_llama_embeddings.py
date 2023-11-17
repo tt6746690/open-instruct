@@ -26,8 +26,9 @@ from open_instruct.finetune_trainer import encode_with_prompt_completion_format,
 
 
 def encode_just_one_role(example, tokenizer, max_seq_length, encode_fn_type):
+    """Takes first-turn conversation and encode it as a single sequence."""
     messages = example['messages']
-    assert(len(messages) == 2)
+    assert(len(messages) >= 2)
     
     if encode_fn_type == 'input':
         text = messages[0]['content']

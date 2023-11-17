@@ -268,13 +268,19 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             raise ValueError(f'Invalid embed_type = {embed_type}')
         save_dir_clustering = os.path.join('clustering', encode_fn_type, model_name, dataset, clustering_fn)
         os.makedirs(save_dir_clustering, exist_ok=True)
+        # normalize embeddings to unit norm if the model that generated the embeddings does the 
+        # same, e.g., mpnet, bge, or if using spherical kmeans clustering.
+        if any(x in model_name for x in ['mpnet', 'bge']) or 'kmeansfaisscd' in clustering_fn:
+            normalize_embeddings = True
+        else:
+            normalize_embeddings = False
         kwargs = {
             'model_name': model_name,
             'dataset': dataset,
             'encode_fn_type': encode_fn_type,
             'clustering_fn': clustering_fn,
             'embed_type': embed_type,
-            'normalize_embeddings': True if any(x in model_name for x in ['mpnet', 'bge']) else False,
+            'normalize_embeddings': normalize_embeddings,
             'first_N': None,
             'save_dir': save_dir_clustering,
         }
