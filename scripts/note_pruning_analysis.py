@@ -128,22 +128,30 @@ def get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embeddi
         save_path = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}.pkl')
     else:
         save_path = os.path.join(lm_output_dir, model_name, f'{dataset}.pkl')
-    if dataset == 'ultrachat15' and os.path.isfile(save_path):
-        ## concat ultrachat data shards.
-        output = {}
-        for i in range(10):
-            with open(os.path.join(lm_output_dir, model_name, f'{dataset}_{i}.pkl'), 'rb') as f:
-                output_i = pickle.load(f)
-                for k, v in output_i.items():
-                    if k not in output:
-                        output[k] = []
-                    output[k].append(v)
-        output = {k: np.vstack(v) for k, v in output.items()}     
-        with open(save_path, 'wb') as f:
-            pickle.dump(output, f)
-    else:
+    
+    if os.path.isfile(save_path):
         with open(save_path, 'rb') as f:
             output = pickle.load(f)
+    else:
+        if dataset == 'ultrachat15':
+            ## concat ultrachat data shards.
+            output = {}
+            for i in range(10):
+                if encode_fn_type != 'sft':
+                    save_path_shard = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}_{i}.pkl')
+                else:
+                    save_path_shard = os.path.join(lm_output_dir, model_name, f'{dataset}_{i}.pkl')
+                with open(save_path_shard, 'rb') as f:
+                    output_i = pickle.load(f)
+                    for k, v in output_i.items():
+                        if k not in output:
+                            output[k] = []
+                        output[k].append(v)
+            output = {k: np.vstack(v) for k, v in output.items()}     
+            with open(save_path, 'wb') as f:
+                pickle.dump(output, f)
+        else:
+            raise ValueError(f'save_path={save_path} does not exist, and cannot assemble shards for dataset={dataset}')
     if not return_text_embedding:
         for k in ['text_embedding', 'text_embeddings', 'grad_rp_loraB']:
             if k in output:

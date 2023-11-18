@@ -253,10 +253,10 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
     elif sort_by.startswith('semdedup'):
         import note_pruning_clustering
         md = re.search(r'md=([^_]+)', sort_by).group(1)
-        assert md in ['mpnet', 'bge', 'llama7b']
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
-        (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
-        (md == 'llama7b' and not model_name.startswith('llama-7b')):
+           (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
+           (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
+           (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')):
             raise ValueError(f'md={md} does not match with model_name={model_name}')
         clustering_fn = sort_by.split('semdedup_')[-1]
         match = re.search(r'dist=([^_]+)', sort_by)

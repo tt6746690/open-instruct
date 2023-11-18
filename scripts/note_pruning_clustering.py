@@ -32,7 +32,10 @@ def get_clustering_info_df():
 
     paths = glob.glob('clustering/*/*/*/*/')
     for path in paths:
-        with open(os.path.join(path, 'info.json'), 'r') as f:
+        path_info = os.path.join(path, 'info.json')
+        if not os.path.exists(path_info):
+            continue
+        with open(path_info, 'r') as f:
             d = json.load(f)
         d.update(d.pop('scores'))
         d = {'n_clusters': int(re.search(r'nc=([^_]+)', d['clustering_fn']).group(1)),
