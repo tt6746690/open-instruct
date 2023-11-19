@@ -30,7 +30,7 @@ einops
 scipy
 auto-gptq
 fire
-alpaca-eval==0.3.1
+-e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/alpaca_eval
 # for human eval web app
 flask
 # vllm
@@ -42,3 +42,4 @@ pyarrow
 matplotlib
 tensorboard
 faiss-gpu
+hdbscan

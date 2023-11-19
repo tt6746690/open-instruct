@@ -315,7 +315,7 @@ def clustering_run(run_name, X):
     match = re.search(r'cl=([^_]+)', run_name)
     clustering_algo = match.group(1)
     match = re.search(r'nc=([^_]+)', run_name)
-    n_clusters = int(match.group(1))
+    n_clusters = int(match.group(1)) if match else None
 
     if clustering_algo == 'kmeans':
         clustering_model = KMeans(
@@ -363,6 +363,20 @@ def clustering_run(run_name, X):
         kmeans.train(X)
         C = kmeans.centroids
         _, Y = kmeans.index.search(X, 1)
+    elif clustering_algo.startswith('hdbscan'):
+        import hdbscan
+        assert(clustering_algo in ['hdbscanl2', 'hdbscancd'])
+        dist = clustering_algo.replace('hdbscan', '')
+        match = re.search(r'ms=([^_]+)', run_name)
+        min_samples = int(match.group(1))
+        db = hdbscan.HDBSCAN(
+            metric=('arccos' if dist=='cd' else 'euclidean'),
+            min_samples=min_samples,
+            min_cluster_size=100,
+        )
+        db.fit(X)
+        Y = db.labels_
+        C = np.vstack([X[Y==i].mean(0) for i in np.unique(Y)])
     else:
         raise ValueError(f'clustering_algo={clustering_algo} not implemented.')
     

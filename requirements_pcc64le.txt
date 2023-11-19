@@ -32,7 +32,7 @@ omegaconf
 pynvml
 openai
 tiktoken
-alpaca-eval==0.3.1
+-e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/alpaca_eval
 
 # ppc64le build fails
 # https://github.com/SamuraiT/mecab-python3/issues/95
@@ -47,3 +47,4 @@ alpaca-eval==0.3.1
 # install deepspeed according to https://docs.google.com/document/d/136VZGFKlylkcKqXDZDIu1-584GWscYvn0n1oAik9qZs/edit if needed.
 # deepspeed==0.9.1
 
+hdbscan
