@@ -48,3 +48,4 @@ tiktoken
 # deepspeed==0.9.1
 
 hdbscan
+-e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/DPPy
