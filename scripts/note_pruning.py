@@ -157,7 +157,7 @@ def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos', torch_compile=False):
         else:
             return Ki.to('cpu').numpy()
 
-    def kernel_matrix_diag():
+    def kernel_matrix_diag(): 
         if kernel_type == 'Kcos':
             Kdiag = (X*X).sum(-1)
         elif kernel_type == 'Kcosp':
@@ -252,18 +252,19 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         pkl_extra['kmeans'] = kms
     elif sort_by.startswith('semdedup'):
         import note_pruning_clustering
-        md = re.search(r'md=([^_]+)', sort_by).group(1)
+        from rosemary import parse_kv_from_string, create_string_from_kv
+        kvs = parse_kv_from_string(sort_by)
+        md = kvs['md']
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
-           (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
-           (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
-           (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')):
+        (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
+        (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
+        (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')):
             raise ValueError(f'md={md} does not match with model_name={model_name}')
-        clustering_fn = sort_by.split('semdedup_')[-1]
-        match = re.search(r'dist=([^_]+)', sort_by)
-        dist = match.group(1)
+        clustering_fn = create_string_from_kv(
+            {k: v for k, v in kvs.items() if k in ['cl', 'nc', 'bsz', 'ms', 'emb']})
+        dist = kvs['dist']
         assert(dist in ['cd', 'l2'])
-        match = re.search(r'emb=([^_]+)', sort_by)
-        embed_type = re.sub(r'[+]', '_', match.group(1))
+        embed_type = re.sub(r'[+]', '_', kvs['emb'])
         if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
             raise ValueError(f'Invalid embed_type = {embed_type}')
         save_dir_clustering = os.path.join('clustering', encode_fn_type, model_name, dataset, clustering_fn)

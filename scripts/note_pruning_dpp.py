@@ -4,12 +4,30 @@ from numpy.random import RandomState
 from scipy.spatial.distance import squareform, pdist, cdist
 from dppy.finite_dpps import FiniteDPP
 
+import pyarrow # add before importing torch
+import torch
+
 import matplotlib.pyplot as plt
 
 import sys
 sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
 from dpp import dpp
 
+
+def torch_vmf_kernel(X, Y, gamma=1.0):
+    """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)
+        Assuems `X` and `Y` have unit norm. """
+    S = X@Y.T
+    S = (S-1)/2 # ensures S \in [-1,0]
+    K = torch.exp(gamma*S)
+    return K
+
+
+def torch_rbf_kernel(X, Y=None, sigma=1.0):
+    """ Computes the standard Gaussian kernel k(x,y)=exp(- ||x-y||**2 / (2·σ2)). """
+    sq_dists = torch.cdist(X, Y, p=2)**2
+    K = torch.exp(-sq_dists / (2 * sigma**2))
+    return K
 
 
 
@@ -34,6 +52,7 @@ def gauss_kernel(X, Y=None, sigma=1.0):
         Returns the kernel matrix
     """
     sq_dists = sq_distances(X,Y)
+    S = sq_dists
     K = np.exp(-sq_dists / (2 * sigma**2))
     return K
 
@@ -47,15 +66,31 @@ def vmf_kernel(X, Y, gamma=1.0):
     K = np.exp(gamma*S)
     return K
 
-
 def linear_kernel(X, Y):
     return np.dot(X, Y.T)
+
 
 
 def cholesky_jitter(K, jitter=1e-5):
     K[np.diag_indices_from(K)] += jitter
     return K
 
+
+def torch_vmf_kernel(X, Y, gamma=1.0):
+    """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)
+        Assuems `X` and `Y` have unit norm. """
+    S = X@Y.T
+    S = (S-1)/2 # ensures S \in [-1,0]
+    K = torch.exp(gamma*S)
+    S = K
+    return K
+
+
+def torch_rbf_kernel(X, Y=None, sigma=1.0):
+    """ Computes the standard Gaussian kernel k(x,y)=exp(- ||x-y||**2 / (2·σ2)). """
+    sq_dists = torch.cdist(X, Y, p=2)**2
+    K = torch.exp(-sq_dists / (2 * sigma**2))
+    return K
 
 
 def get_X(N, d, dist='rand'):
@@ -99,6 +134,23 @@ def get_L(X, kernel_type):
     return L
 
 
+
+def torch_vmf_kernel(X, Y, gamma=1.0):
+    """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)"""
+    S = X@Y.T
+    S = (S-1)/2 # ensures S \in [-1,0]
+    K = torch.exp(gamma*S)
+    return K
+
+
+def torch_rbf_kernel(X, Y=None, sigma=1.0):
+    """ Computes the standard Gaussian kernel k(x,y)=exp(- ||x-y||**2 / (2·σ2)). """
+    sq_dists = torch.cdist(X, Y, p=2)**2
+    K = torch.exp(-sq_dists / (2 * sigma**2))
+    return K
+
+
+
 def get_subset(L, subset_type, k):
     rng = RandomState(0)
     if subset_type == 'random':
@@ -133,7 +185,7 @@ def plt_subsets(Is, data):
             for y in np.unique(Y):
                 ax.scatter(X[Y==y,0], X[Y==y,1], alpha=.3, cmap='Pastel1')
         ax.scatter(Xs[:,0], Xs[:,1], color='r', s=50, label=subset_type)
-        ax.set_title(f'{subset_type} (M={len(inds)})', fontsize=12)
+        ax.set_title(f'{subset_type} (M={len(inds)})', fontsize=10)
         ax.set_aspect('equal')
         ax = axs[1, i]
         θ = np.arctan(Xs[:,1]/Xs[:,0])
@@ -146,4 +198,40 @@ def plt_subsets(Is, data):
         ax.set_xlabel(f'H(θ)={H_θ:.3f} (H(Unif(θ))={H_uniform:.3f})')
 
     fig.tight_layout()
-    return fig, axs
+    return fig, axs 
+
+
+def dppmapbd(X, Y, kernel_type, epsilon=1E-10):
+    """dppmap with block-diagonal kernel
+        `kernel_matrix_list` is kernel matrix for data points within each cluster
+    """
+    clusters = sorted(list(np.unique(Y)))
+    I = []
+    for i in clusters:
+        mask = (Y==i)
+        inds_global = np.where(mask)[0]
+        Xi = X[mask]
+        Li = get_L(Xi, kernel_type)
+        inds = dpp(Li, max_length=len(Li), epsilon=epsilon)
+        I.append(inds_global[inds])
+    I = np.hstack(I)
+    return I.tolist()
+
+
+
+def matmul_mem_efficient(a, b, device='cuda', split_dim=1, gpu_mem_budget=.1):
+    """assume `b` is more memory intensive
+        put `a` into gpu memory by default.
+        and put chunks of `b` into memory. """
+    import math
+    num_chunks = math.ceil(((a.numel() + b.numel())*4 / (1024**3)) / gpu_mem_budget)
+    split_size = math.ceil(b.shape[split_dim] / num_chunks)
+    c = []
+    a = a.to(device)
+    b_split = torch.split(b, split_size, dim=split_dim)
+    for bi in b_split:
+        bi = bi.to(device,  non_blocking=True)
+        ci = a@bi
+        c.append(ci.to('cpu'))
+    c = torch.hstack(c)
+    return c
