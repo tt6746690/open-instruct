@@ -57,7 +57,6 @@ def linear_kernel(X, Y):
     return np.dot(X, Y.T)
 
 
-
 def cholesky_jitter(K, jitter=1e-5):
     K[np.diag_indices_from(K)] += jitter
     return K
@@ -119,22 +118,6 @@ def get_L(X, kernel_type):
     else:
         raise ValueError(f'X ({X.shape}) with kernel_type={kernel_type} cannot compute L.')
     return L
-
-
-
-def torch_vmf_kernel(X, Y, gamma=1.0):
-    """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)"""
-    S = X@Y.T
-    S = (S-1)/2 # ensures S \in [-1,0]
-    K = torch.exp(gamma*S)
-    return K
-
-
-def torch_rbf_kernel(X, Y=None, sigma=1.0):
-    """ Computes the standard Gaussian kernel k(x,y)=exp(- ||x-y||**2 / (2·σ2)). """
-    sq_dists = torch.cdist(X, Y, p=2)**2
-    K = torch.exp(-sq_dists / (2 * sigma**2))
-    return K
 
 
 
@@ -205,12 +188,17 @@ def dppmapbd(X, Y, kernel_type, epsilon=1E-10):
     return I.tolist()
 
 
+def torch_linear_kernel(X, Y=None):
+    S = X@Y.T
+    K = (S+1)/2 # ensures K \in [0,1]
+    return K
+
+
 def torch_vmf_kernel(X, Y, gamma=1.0):
-    """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)
-        Assuems `X` and `Y` have unit norm. """
+    """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)"""
     S = X@Y.T
     S = (S-1)/2 # ensures S \in [-1,0]
-    K = torch.exp(gamma*S)
+    K = torch.exp(gamma*S) # ensures K \in [0,1]
     return K
 
 
@@ -240,11 +228,11 @@ def matmul_mem_efficient(a, b, device='cuda', split_dim=1, gpu_mem_budget=.1):
 
 
 
-
 def torch_dppmap(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
     """dpp map inference 
             - https://arxiv.org/pdf/1709.05135.pdf
     """
+    from tqdm import tqdm
     # (M, N)
     cis = torch.zeros((M, N), dtype=torch.float32)
     # marginal gain of logdet by including j-th item at each iteration
@@ -256,7 +244,7 @@ def torch_dppmap(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
     inds = []
     j = torch.argmax(di2s).item()
     inds.append(j)
-    while len(inds) < M:
+    for _ in tqdm(range(M-1)):
         if verbose:
             if len(inds) % (M // 10) == 0:
                 print('fast_map_dpp iterations = ', len(inds))
@@ -277,7 +265,7 @@ def torch_dppmap(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
 
         if di2s[j] < epsilon:
             if verbose:
-                print(f'Stop on dᵢ^2 = {di2s[j]}')
+                print(f'Stop on dᵢ^2 = {di2s[j]}. len(inds)={len(inds)}')
             break
         inds.append(j)
 
@@ -320,6 +308,8 @@ def compute_dppmap(
         kernel_fn = partial(torch_vmf_kernel, **kernel_kwargs)
     elif kernel_type == 'rbf':
         kernel_fn = partial(torch_rbf_kernel, **kernel_kwargs)
+    elif kernel_type == 'lin':
+        kernel_fn = torch_linear_kernel
     else:
         raise ValueError(f'kernel_type={kernel_type} not supported.')
         
@@ -355,6 +345,8 @@ def compute_dppmap(
             Q = dq['log_prob']
             Q = np.exp(Q)
         else:
+            if quality_score_type not in dq:
+                raise ValueError(f'quality_score_type={quality_score_type} not pre-computed {dq.keys()}')
             Q = dq[quality_score_type]
         Q = torch.from_numpy(Q).to(device)
     Q = Q.reshape(-1)
@@ -391,6 +383,7 @@ def compute_dppmap(
     }
     t0 = time.time()
     inds, marginal_gains = torch_dppmap(Ki_fn, Kd_fn, N, max_length, verbose=True)
+    output['M'] = len(inds)
     output["time_elapsed"] = time.time()-t0
     output['marginal_gains'] = marginal_gains
 

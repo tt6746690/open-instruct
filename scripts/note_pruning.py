@@ -324,7 +324,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             'quality_score_embed_model': kvs.get('qmd', None),
             'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
             'device': 'cuda',
-            'max_length': min(50_000, .3*N),
+            'max_length': min(50_000, .5*N), # balance finish job within 6 hrs with wanting to prune a lot
         }
         print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
         S, output = note_pruning_dpp.compute_dppmap(**kwargs)
