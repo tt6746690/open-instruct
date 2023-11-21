@@ -308,8 +308,11 @@ def sklearn_compute_inertia_dense(X, Y, C):
                           labels=Y.squeeze().astype(np.int32),
                           n_threads=1)
 
-
+ 
 def clustering_run(run_name, X):
+    """ `run_name` is a string with `k=v` where k \in {cl, nc, bsz, ms, emb}
+        Note `emb` not explicitly used, but X depends on it, so should keep it.
+    """
     from sklearn.cluster import KMeans, MiniBatchKMeans
 
     match = re.search(r'cl=([^_]+)', run_name)
@@ -357,7 +360,7 @@ def clustering_run(run_name, X):
             d=X.shape[1],
             k=n_clusters,
             spherical=(dist=='cd'),
-            niter=30,
+            niter=50,
             verbose=True,
             seed=0)
         kmeans.train(X)
