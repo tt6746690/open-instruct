@@ -8,6 +8,8 @@ import numpy as np
 import pyarrow # need this before torch!
 import torch
 
+
+from rosemary import parse_kv_from_string, create_string_from_kv
 from note_pruning_analysis import lm_output_dir
 
 def save_to_pickle(save_path, output):
@@ -187,7 +189,7 @@ def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos', torch_compile=False):
 
 def save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, dataset):
     
-    if any(sort_by.startswith(x) for x in ['dpp']):
+    if any(sort_by.startswith(x) for x in ['dpp_']):
         output = {'inds': inds}
         if pkl_extra:
             output.update(pkl_extra)
@@ -199,7 +201,12 @@ def save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, datase
         save_sorted_inds(save_dir, S, sort_by, extra=pkl_extra, reverse=True)
 
         ## use `note_pruning` to generate scores for curriculum learning.
-        for pacing_fn in [sort_by, sort_by+'_neg']:
+        if any(sort_by.startswith(x) for x in ['dppmap', 'semdedup']):
+            # cases when the reverse ordering does not make sense.
+            pacing_fn_list = [sort_by]
+        else:
+            pacing_fn_list = [sort_by, sort_by+'_neg']
+        for pacing_fn in pacing_fn_list:
             curriculum_output_dir = os.path.join('curriculum', model_name, dataset, pacing_fn)
             os.makedirs(curriculum_output_dir, exist_ok=True)
             save_path = os.path.join(curriculum_output_dir, 'scores.pkl')
@@ -252,7 +259,6 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         pkl_extra['kmeans'] = kms
     elif sort_by.startswith('semdedup'):
         import note_pruning_clustering
-        from rosemary import parse_kv_from_string, create_string_from_kv
         kvs = parse_kv_from_string(sort_by)
         md = kvs['md']
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
@@ -289,7 +295,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         X, Y, C = note_pruning_clustering.main(**kwargs)
         print('Apply SemDeDup to discard duplicates.')
         S = note_pruning_clustering.semdedup(X, Y, dist=dist, device='cuda')
-    elif sort_by.startswith('dpp'):
+    elif sort_by.startswith('dpp_'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None
         match = re.search(r'emb=([^_]+)', sort_by)
@@ -299,6 +305,30 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         emb = d[embed_type]
         log_prob = d['log_prob']
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
+    elif sort_by.startswith('dppmap'):
+        import note_pruning_dpp
+        kvs = parse_kv_from_string(sort_by)
+        if kvs['k'] == 'vmf':
+            kernel_kwargs = {'gamma': kvs['gamma']}
+        elif kvs['k'] == 'rbf':
+            kernel_kwargs = {'sigma': kvs['sigma']}
+        else:
+            kernel_kwargs = {}
+        kwargs = {
+            'dataset': dataset,
+            'kernel_type': kvs['k'],
+            'kernel_embed_model': kvs['kmd'],
+            'kernel_embed_type': re.sub(r'[+]', '_', kvs['kemb']) if 'kemb' in kvs else 'text_embedding',
+            'kernel_kwargs': kernel_kwargs,
+            'quality_score_type': re.sub(r'[+]', '_', kvs['q']) if 'q' in kvs else None,
+            'quality_score_embed_model': kvs.get('qmd', None),
+            'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
+            'device': 'cuda',
+            'max_length': min(50_000, .3*N),
+        }
+        print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
+        S, output = note_pruning_dpp.compute_dppmap(**kwargs)
+        pkl_extra['info'] = output
     elif sort_by.startswith('rho'):
         if sort_by == 'rhov1':
             model_names = ['mistral-7b+lora:r=256:a=256',
