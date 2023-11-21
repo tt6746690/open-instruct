@@ -1,5 +1,8 @@
 import re
+import time
 import numpy as np
+from functools import partial
+
 from numpy.random import RandomState
 from scipy.spatial.distance import squareform, pdist, cdist
 from dppy.finite_dpps import FiniteDPP
@@ -12,22 +15,6 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
 from dpp import dpp
-
-
-def torch_vmf_kernel(X, Y, gamma=1.0):
-    """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)
-        Assuems `X` and `Y` have unit norm. """
-    S = X@Y.T
-    S = (S-1)/2 # ensures S \in [-1,0]
-    K = torch.exp(gamma*S)
-    return K
-
-
-def torch_rbf_kernel(X, Y=None, sigma=1.0):
-    """ Computes the standard Gaussian kernel k(x,y)=exp(- ||x-y||**2 / (2·σ2)). """
-    sq_dists = torch.cdist(X, Y, p=2)**2
-    K = torch.exp(-sq_dists / (2 * sigma**2))
-    return K
 
 
 
@@ -218,6 +205,21 @@ def dppmapbd(X, Y, kernel_type, epsilon=1E-10):
     return I.tolist()
 
 
+def torch_vmf_kernel(X, Y, gamma=1.0):
+    """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)
+        Assuems `X` and `Y` have unit norm. """
+    S = X@Y.T
+    S = (S-1)/2 # ensures S \in [-1,0]
+    K = torch.exp(gamma*S)
+    return K
+
+
+def torch_rbf_kernel(X, Y=None, sigma=1.0):
+    """ Computes the standard Gaussian kernel k(x,y)=exp(- ||x-y||**2 / (2·σ2)). """
+    sq_dists = torch.cdist(X, Y, p=2)**2
+    K = torch.exp(-sq_dists / (2 * sigma**2))
+    return K
+
 
 def matmul_mem_efficient(a, b, device='cuda', split_dim=1, gpu_mem_budget=.1):
     """assume `b` is more memory intensive
@@ -235,3 +237,173 @@ def matmul_mem_efficient(a, b, device='cuda', split_dim=1, gpu_mem_budget=.1):
         c.append(ci.to('cpu'))
     c = torch.hstack(c)
     return c
+
+
+
+
+def torch_dppmap(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
+    """dpp map inference 
+            - https://arxiv.org/pdf/1709.05135.pdf
+    """
+    # (M, N)
+    cis = torch.zeros((M, N), dtype=torch.float32)
+    # marginal gain of logdet by including j-th item at each iteration
+    marginal_gains = []
+    # (N,)
+    # di2s = torch.diag(K)
+    di2s = Kd_fn()
+    # grows to at most length M
+    inds = []
+    j = torch.argmax(di2s).item()
+    inds.append(j)
+    while len(inds) < M:
+        if verbose:
+            if len(inds) % (M // 10) == 0:
+                print('fast_map_dpp iterations = ', len(inds))
+        marginal_gains.append(di2s[j].item())
+        k = len(inds) - 1
+        # (k,)
+        ci_optimal = cis[:k, j]
+        di_optimal = torch.sqrt(di2s[j])
+        # Kj = K[j, :]
+        Kj = Ki_fn(j)
+        # (N,) - (k,)@(k,N) / (,) -> (N,)
+        eis = (Kj - ci_optimal@cis[:k, :]) / di_optimal
+        # update to k are updated.
+        cis[k, :] = eis
+        di2s -= torch.square(eis)
+        di2s[j] = -float('inf')
+        j = torch.argmax(di2s).item()
+
+        if di2s[j] < epsilon:
+            if verbose:
+                print(f'Stop on dᵢ^2 = {di2s[j]}')
+            break
+        inds.append(j)
+
+    return inds, marginal_gains
+
+
+
+def get_full_model_name(md):
+    if md == 'mpnet':
+        model_name = 'all-mpnet-base-v2'
+    elif md == 'bge':
+        model_name = 'bge-large-en-v1.5'
+    elif md == 'llama7b':
+        model_name = 'llama-7b+lora:r=256:a=256'
+    elif md == 'mistral7b':
+        model_name = 'mistral-7b+lora:r=256:a=256'
+    else:
+        raise ValueError(f'Dont know full name for model_name={md}')
+    return model_name
+
+
+
+
+def compute_dppmap(
+    dataset,
+    kernel_type,
+    kernel_embed_model,
+    kernel_embed_type,
+    kernel_kwargs,
+    quality_score_type,
+    quality_score_embed_model,
+    theta,
+    max_length,
+    device,
+):
+    
+    from note_pruning_analysis import get_lm_output
+
+    if kernel_type == 'vmf':
+        kernel_fn = partial(torch_vmf_kernel, **kernel_kwargs)
+    elif kernel_type == 'rbf':
+        kernel_fn = partial(torch_rbf_kernel, **kernel_kwargs)
+    else:
+        raise ValueError(f'kernel_type={kernel_type} not supported.')
+        
+    if kernel_embed_model not in ['mpnet', 'bge', 'llama7b', 'mistral7b']:
+        raise ValueError(f'kernel_embed_model={kernel_embed_model} not supported.')
+    if theta != 0. and \
+        quality_score_embed_model not in ['mpnet', 'bge', 'llama7b', 'mistral7b']:
+        # if theta!=0, then we're using quality score and so need to specify model
+        raise ValueError(f'quality_score_embed_model={quality_score_embed_model} not supported.')
+    if kernel_embed_type not in ['text_embedding', 'grad_rp_loraB']:
+        raise ValueError(f'kernel_embed_type={kernel_embed_type} not supported.')
+        
+
+    dk = get_lm_output(
+        dataset, 
+        get_full_model_name(kernel_embed_model),
+        encode_fn_type='input' if kernel_embed_model in ['mpnet', 'bge'] else 'sft', 
+        return_text_embedding=True)
+    X = dk[kernel_embed_type]
+    if any(x in kernel_embed_model for x in ['mpnet', 'bge']):
+        X = X / np.maximum(np.linalg.norm(X, axis=-1, keepdims=True), 1e-8) # possibly divide by zero.
+    X = torch.from_numpy(X).to(device)
+
+    if quality_score_type is None:
+        Q = torch.ones([1], device=device).expand(len(X))
+    else:
+        dq = get_lm_output(
+            dataset, 
+            get_full_model_name(quality_score_embed_model),
+            encode_fn_type='input' if quality_score_embed_model in ['mpnet', 'bge'] else 'sft', 
+            return_text_embedding=True)
+        if quality_score_type == 'prob':
+            Q = dq['log_prob']
+            Q = np.exp(Q)
+        else:
+            Q = dq[quality_score_type]
+        Q = torch.from_numpy(Q).to(device)
+    Q = Q.reshape(-1)
+    alpha = theta / (2*(max(1-theta, 1e-5)))
+    Q = torch.exp(alpha*Q)
+
+    if not X.shape[0] == Q.numel():
+        raise ValueError(f'X ({X.shape}) and Q ({Q.shape}) does not match')
+
+    N = X.shape[0]
+
+    def Ki_fn(i):
+        Si = kernel_fn(X[i], X)
+        Ki = Q[i] * Si * Q
+        Ki = Ki.reshape(-1).to('cpu')
+        return Ki
+
+    def Kd_fn():
+        Kd = torch.stack([kernel_fn(X[i], X[i]) for i in range(len(X))])
+        Kd = Kd * Q**2
+        Kd = Kd.reshape(-1).to('cpu')
+        return Kd
+
+    output = {
+        'dataset': dataset,
+        'kernel_type': kernel_type,
+        'kernel_embed_model': kernel_embed_model,
+        'kernel_embed_type': kernel_embed_type,
+        'kernel_kwargs': kernel_kwargs,
+        'quality_score_type': quality_score_type,
+        'quality_score_embed_model': quality_score_embed_model,
+        'theta': theta,
+        'max_length': max_length
+    }
+    t0 = time.time()
+    inds, marginal_gains = torch_dppmap(Ki_fn, Kd_fn, N, max_length, verbose=True)
+    output["time_elapsed"] = time.time()-t0
+    output['marginal_gains'] = marginal_gains
+
+    ## convert `inds` to scores `S`
+    # assign random data points to the rest of the slots, after `max_length`
+    inds_left = set(np.arange(N).tolist()) - set(inds)
+    np.random.seed(0)
+    inds_left = np.random.permutation(list(inds_left)).tolist()
+    inds += inds_left
+    assert(len(inds) == N)
+    # points ranked higher in `inds` will have a smaller score
+    S = np.zeros(N, dtype=np.int64)
+    for i, ind in enumerate(inds):
+        S[ind] = i
+
+    return S, output
