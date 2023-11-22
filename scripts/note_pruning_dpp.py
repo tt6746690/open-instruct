@@ -228,7 +228,7 @@ def matmul_mem_efficient(a, b, device='cuda', split_dim=1, gpu_mem_budget=.1):
 
 
 
-def torch_dppmap(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
+def torch_dppmap_memefficient(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
     """dpp map inference 
             - https://arxiv.org/pdf/1709.05135.pdf
     """
@@ -245,9 +245,6 @@ def torch_dppmap(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
     j = torch.argmax(di2s).item()
     inds.append(j)
     for _ in tqdm(range(M-1)):
-        if verbose:
-            if len(inds) % (M // 10) == 0:
-                print('fast_map_dpp iterations = ', len(inds))
         marginal_gains.append(di2s[j].item())
         k = len(inds) - 1
         # (k,)
@@ -265,12 +262,65 @@ def torch_dppmap(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
 
         if di2s[j] < epsilon:
             if verbose:
-                print(f'Stop on dᵢ^2 = {di2s[j]}. len(inds)={len(inds)}')
+                print(f'Stop on dᵢ^2 = {di2s[j]}. len(inds)={len(inds)} / {N}')
             break
         inds.append(j)
 
     return inds, marginal_gains
 
+
+def Ki_fn_full(i, kernel_fn, X, Q):
+    Si = kernel_fn(X[i], X)
+    Ki = Q[i] * Si * Q
+    Ki = Ki.reshape(-1).to('cpu')
+    return Ki
+
+
+def Kd_fn_full(kernel_fn, X, Q):
+    Kd = torch.stack([kernel_fn(X[i], X[i]) for i in range(len(X))])
+    Kd = Kd * Q**2
+    Kd = Kd.reshape(-1).to('cpu')
+    return Kd
+
+
+def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None):
+    N = len(X)
+    if dppmap_type == 'dppmap':
+        Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
+        Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
+        output = torch_dppmap_memefficient(Ki_fn, Kd_fn, N, max_length, verbose=True)
+    elif dppmap_type == 'dppmapbd': # block diagonal
+        clusters = sorted(list(torch.unique(Y).cpu().numpy()))
+        inds_list = []
+        marginal_gains_list = []
+        for i in clusters:
+            print(f'dppmapbd: cluster = {i} / {len(clusters)}')
+            mask = (Y == i)
+            inds_global = np.nonzero(mask.reshape(-1).to('cpu').numpy())[0]
+            Xi = X[mask]
+            Qi = Q[mask]
+            Ni = Xi.shape[0]
+            if Ni <= 10: continue
+            Mi = min(Ni, max_length) # max_length, just take all 
+            Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=Xi, Q=Qi)
+            Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=Xi, Q=Qi)
+            inds, marginal_gains = torch_dppmap_memefficient(
+                Ki_fn, Kd_fn, Ni, Mi, verbose=True)
+            inds_list += inds_global[np.array(inds)].tolist()
+            marginal_gains_list += marginal_gains
+        ## Use `marginal_gains` to rank points cross clusters 
+        # so that points with higher marginal gains appears at the front of the list
+        inds, marginal_gains = inds_list, marginal_gains_list
+        if len(inds)!=len(marginal_gains):
+            raise ValueError(f'len(inds)={len(inds)} != len(marginal_gains)={len(marginal_gains)}')
+        inds, marginal_gains = zip(*[(i, v) for i, v in sorted(
+            zip(inds, marginal_gains), key=lambda x: x[1], reverse=True)])
+        inds, marginal_gains = list(inds), list(marginal_gains)
+        assert(all([x==y for x, y in zip(marginal_gains, sorted(marginal_gains, reverse=True))]))
+        output = inds, marginal_gains
+    else:
+        raise ValueError(f'dppmap_type={dppmap_type} not implemented.')
+    return output
 
 
 def get_full_model_name(md):
@@ -288,8 +338,8 @@ def get_full_model_name(md):
 
 
 
-
 def compute_dppmap(
+    dppmap_type,
     dataset,
     kernel_type,
     kernel_embed_model,
@@ -300,6 +350,7 @@ def compute_dppmap(
     theta,
     max_length,
     device,
+    Y=None, # cluster assignments
 ):
     
     from note_pruning_analysis import get_lm_output
@@ -353,22 +404,12 @@ def compute_dppmap(
     alpha = theta / (2*(max(1-theta, 1e-5)))
     Q = torch.exp(alpha*Q)
 
-    if not X.shape[0] == Q.numel():
-        raise ValueError(f'X ({X.shape}) and Q ({Q.shape}) does not match')
+    if Y is not None:
+        Y = torch.from_numpy(Y.reshape(-1)).to(device)
 
     N = X.shape[0]
-
-    def Ki_fn(i):
-        Si = kernel_fn(X[i], X)
-        Ki = Q[i] * Si * Q
-        Ki = Ki.reshape(-1).to('cpu')
-        return Ki
-
-    def Kd_fn():
-        Kd = torch.stack([kernel_fn(X[i], X[i]) for i in range(len(X))])
-        Kd = Kd * Q**2
-        Kd = Kd.reshape(-1).to('cpu')
-        return Kd
+    if not X.shape[0] == Q.numel():
+        raise ValueError(f'X ({X.shape}) and Q ({Q.shape}) does not match')
 
     output = {
         'dataset': dataset,
@@ -382,7 +423,7 @@ def compute_dppmap(
         'max_length': max_length
     }
     t0 = time.time()
-    inds, marginal_gains = torch_dppmap(Ki_fn, Kd_fn, N, max_length, verbose=True)
+    inds, marginal_gains = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=Y)
     output['M'] = len(inds)
     output["time_elapsed"] = time.time()-t0
     output['marginal_gains'] = marginal_gains
@@ -393,7 +434,8 @@ def compute_dppmap(
     np.random.seed(0)
     inds_left = np.random.permutation(list(inds_left)).tolist()
     inds += inds_left
-    assert(len(inds) == N)
+    if not len(inds) == N:
+        raise ValueError(f'len(inds)={len(inds)} != N={N}')
     # points ranked higher in `inds` will have a smaller score
     S = np.zeros(N, dtype=np.int64)
     for i, ind in enumerate(inds):
