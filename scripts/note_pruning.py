@@ -271,8 +271,6 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         dist = kvs['dist']
         assert(dist in ['cd', 'l2'])
         embed_type = re.sub(r'[+]', '_', kvs['emb'])
-        if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
-            raise ValueError(f'Invalid embed_type = {embed_type}')
         save_dir_clustering = os.path.join('clustering', encode_fn_type, model_name, dataset, clustering_fn)
         os.makedirs(save_dir_clustering, exist_ok=True)
         # normalize embeddings to unit norm if the model that generated the embeddings does the 
@@ -300,12 +298,10 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         kernel_type = match.group(1) if match else None
         match = re.search(r'emb=([^_]+)', sort_by)
         embed_type = re.sub(r'[+]', '_', match.group(1)) if match else 'text_embedding'
-        if embed_type not in set(d.keys()).intersection(set(['text_embedding', 'grad_rp_loraB'])):
-            raise ValueError(f'Invalid embed_type = {embed_type}')
         emb = d[embed_type]
         log_prob = d['log_prob']
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
-    elif sort_by.startswith('dppmap'):
+    elif sort_by.startswith('dppmap_'):
         import note_pruning_dpp
         kvs = parse_kv_from_string(sort_by)
         if kvs['k'] == 'vmf':
@@ -327,6 +323,67 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             'max_length': min(50_000, .5*N), # balance finish job within 6 hrs with wanting to prune a lot
         }
         print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
+        S, output = note_pruning_dpp.compute_dppmap(**kwargs)
+        pkl_extra['info'] = output
+    elif sort_by.startswith('dppmapbd'):
+        import note_pruning_clustering
+        kvs = parse_kv_from_string(sort_by)
+        md = kvs['kmd']
+        if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
+            (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
+            (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
+            (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')):
+            raise ValueError(f'md={md} does not match with model_name={model_name}')
+        if kvs['k'] == 'vmf':
+            kernel_kwargs = {'gamma': kvs['gamma']}
+        elif kvs['k'] == 'rbf':
+            kernel_kwargs = {'sigma': kvs['sigma']}
+        else:
+            kernel_kwargs = {}
+        kwargs = {
+            'dppmap_type': 'dppmapbd',
+            'dataset': dataset,
+            'kernel_type': kvs['k'],
+            'kernel_embed_model': kvs['kmd'],
+            'kernel_embed_type': re.sub(r'[+]', '_', kvs['kemb']) if 'kemb' in kvs else 'text_embedding',
+            'kernel_kwargs': kernel_kwargs,
+            'quality_score_type': re.sub(r'[+]', '_', kvs['q']) if 'q' in kvs else None,
+            'quality_score_embed_model': kvs.get('qmd', None),
+            'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
+            'device': 'cuda',
+            'max_length': int((.3*N) / kvs['nc']), 
+        }
+        clustering_fn = create_string_from_kv({
+            'cl': kvs.get('cl', 'kmeansfaisscd'),
+            'md': kwargs['kernel_embed_model'],
+            'emb': kwargs['kernel_embed_type'],
+            'nc': kvs['nc'],
+        })
+        save_dir_clustering = os.path.join(
+            'clustering', encode_fn_type, model_name, dataset, clustering_fn)
+        os.makedirs(save_dir_clustering, exist_ok=True)
+        clustering_data_path = os.path.join(save_dir_clustering, 'data.pkl')
+        if not os.path.isfile(clustering_data_path):
+            normalize_embeddings = True if \
+                (any(x in model_name for x in ['mpnet', 'bge']) or 'kmeansfaisscd' in clustering_fn) else False
+            kwargs_clustering = {
+                'model_name': model_name,
+                'dataset': dataset,
+                'encode_fn_type': encode_fn_type,
+                'clustering_fn': clustering_fn,
+                'embed_type': kwargs['kernel_embed_type'],
+                'normalize_embeddings': normalize_embeddings,
+                'first_N': None,
+                'save_dir': save_dir_clustering,
+            }
+            print(f'Calling note_pruning_clustering.main with kwargs={json.dumps(kwargs_clustering, indent=4)}')
+            X, Y, C = note_pruning_clustering.main(**kwargs_clustering)
+        else:
+            with open(clustering_data_path, 'rb') as f:
+                data = pickle.load(f)
+            Y = data['Y']
+        print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
+        kwargs.update({'Y': Y})
         S, output = note_pruning_dpp.compute_dppmap(**kwargs)
         pkl_extra['info'] = output
     elif sort_by.startswith('rho'):
