@@ -8,9 +8,13 @@ import numpy as np
 import pyarrow # need this before torch!
 import torch
 
+from transformers import AutoTokenizer
 
 from rosemary import parse_kv_from_string, create_string_from_kv
-from note_pruning_analysis import lm_output_dir
+from note_pruning_analysis import lm_output_dir, get_dataset_token_lengths
+
+import note_pruning_dpp
+import note_pruning_clustering
 
 def save_to_pickle(save_path, output):
     if 'inds' in output:
@@ -258,7 +262,6 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         S, kms = sort_kmeans_dist_to_cluster_centers(emb, n_clusters, dist_fn=dist_fn)
         pkl_extra['kmeans'] = kms
     elif sort_by.startswith('semdedup'):
-        import note_pruning_clustering
         kvs = parse_kv_from_string(sort_by)
         md = kvs['md']
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
@@ -302,7 +305,6 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         log_prob = d['log_prob']
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
     elif sort_by.startswith('dppmap_'):
-        import note_pruning_dpp
         kvs = parse_kv_from_string(sort_by)
         if kvs['k'] == 'vmf':
             kernel_kwargs = {'gamma': kvs['gamma']}
@@ -311,6 +313,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         else:
             kernel_kwargs = {}
         kwargs = {
+            'dppmap_type': 'dppmap',
             'dataset': dataset,
             'kernel_type': kvs['k'],
             'kernel_embed_model': kvs['kmd'],
@@ -326,8 +329,6 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         S, output = note_pruning_dpp.compute_dppmap(**kwargs)
         pkl_extra['info'] = output
     elif sort_by.startswith('dppmapbd'):
-        import note_pruning_clustering
-        import note_pruning_dpp
         kvs = parse_kv_from_string(sort_by)
         md = kvs['kmd']
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
@@ -410,8 +411,6 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             S = S.squeeze()
             save_prune_results(save_dir, None, S, {}, f'{sort_by}_{k}', model_name, dataset)
     elif sort_by.startswith('numtoks'):
-        from transformers import AutoTokenizer
-        from note_pruning_analysis import get_dataset_token_lengths
         if 'llama' in model_name.lower():
             tokenizer = AutoTokenizer.from_pretrained('results/baselines/huggyllama/llama-7b', use_fast=False)
         elif 'mistral' in model_name.lower():
