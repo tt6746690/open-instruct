@@ -8,6 +8,7 @@ wandb
 data/*
 scripts/text_viz/
 scripts/clustering/
+scripts/dpp
 
 # !data/processed
 output/

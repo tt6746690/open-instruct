@@ -1,5 +1,8 @@
 import re
+import os
 import time
+import json
+import pickle
 import numpy as np
 from functools import partial
 
@@ -16,7 +19,7 @@ import sys
 sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
 from dpp import dpp
 
-
+from note_pruning_analysis import get_lm_output
 
 def sq_distances(X,Y=None):
     """ Returns K where Kij = ||X_i - Y_j||^2 """
@@ -309,6 +312,7 @@ def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None):
                 Ki_fn, Kd_fn, Ni, Mi, verbose=True)
             inds_list += inds_global[np.array(inds)].tolist()
             marginal_gains_list += marginal_gains
+            # if i == 2: break
         ## Use `marginal_gains` to rank points cross clusters 
         # so that points with higher marginal gains appears at the front of the list
         inds, marginal_gains = inds_list, marginal_gains_list
@@ -351,10 +355,12 @@ def compute_dppmap(
     theta,
     max_length,
     device,
+    run_name,
     Y=None, # cluster assignments
 ):
     
-    from note_pruning_analysis import get_lm_output
+    if dppmap_type not in ['dppmap', 'dppmapbd']:
+        raise ValueError(f'dppmap_type={dppmap_type} not supported.')
 
     if kernel_type == 'vmf':
         kernel_fn = partial(torch_vmf_kernel, **kernel_kwargs)
@@ -412,7 +418,8 @@ def compute_dppmap(
     if not X.shape[0] == Q.numel():
         raise ValueError(f'X ({X.shape}) and Q ({Q.shape}) does not match')
 
-    output = {
+    info = {
+        'dppmap_type': dppmap_type,
         'dataset': dataset,
         'kernel_type': kernel_type,
         'kernel_embed_model': kernel_embed_model,
@@ -425,21 +432,77 @@ def compute_dppmap(
     }
     t0 = time.time()
     inds, marginal_gains = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=Y)
-    output['M'] = len(inds)
-    output["time_elapsed"] = time.time()-t0
-    output['marginal_gains'] = marginal_gains
+    info['M'] = len(inds)
+    info["time_elapsed"] = time.time()-t0
 
-    ## convert `inds` to scores `S`
-    # assign random data points to the rest of the slots, after `max_length`
-    inds_left = set(np.arange(N).tolist()) - set(inds)
-    np.random.seed(0)
-    inds_left = np.random.permutation(list(inds_left)).tolist()
-    inds += inds_left
-    if not len(inds) == N:
-        raise ValueError(f'len(inds)={len(inds)} != N={N}')
-    # points ranked higher in `inds` will have a smaller score
-    S = np.zeros(N, dtype=np.int64)
-    for i, ind in enumerate(inds):
-        S[ind] = i
+    data = {}
+    data['marginal_gains'] = marginal_gains
 
-    return S, output
+    dppmap_save_dir = os.path.join('dpp', dataset, run_name)
+    os.makedirs(dppmap_save_dir, exist_ok=True)
+
+    with open(os.path.join(dppmap_save_dir, 'info.json'), 'w') as f:
+        json.dump(info, f, ensure_ascii=False, indent=4)
+        
+    with open(os.path.join(dppmap_save_dir, 'data.pkl'), 'wb') as f:
+        pickle.dump(data, f)
+
+    ## Plot dpp map subset size w.r.t. clusters 
+    if isinstance(Y, torch.Tensor):
+        Y = Y.to('cpu').numpy()
+    cluster_sizes = {k: v for k, v in zip(*np.unique(Y, return_counts=True))}
+    per_cluster_dppmap_subset = {k: v for k, v in zip(*np.unique(Y[inds], return_counts=True))}
+    xs = list(cluster_sizes.keys())
+    fig, ax = plt.subplots(1,1,figsize=(12,4))
+    ys = np.array(list(cluster_sizes.values()))
+    ax.bar(xs, ys, label='Cluster Size')
+    if max_length < ys.max():
+        plt.axhline(y = max_length, color='r', linestyle='--', label='max_length')
+    ys  =np.array([per_cluster_dppmap_subset[i] 
+                if i in per_cluster_dppmap_subset else 0 for i in xs])
+    ax.bar(xs, ys, label=f'{dppmap_type} subset')
+    ax.legend()
+    ax.set_title(f"dppmap subset from each cluster N={N}, M={info['M']}, max_length={max_length}")
+    fig.tight_layout()
+    save_path = os.path.join(dppmap_save_dir, f'fig_dppmap_subset_wrt_clusters.png')
+    fig.savefig(save_path, bbox_inches='tight', dpi=100)
+    plt.close()
+
+    ## plot how marginal gain decays 
+    spacings = 1000
+    fig, axs = plt.subplots(2,1,figsize=(12,6), sharex=True)
+    ys = marginal_gains
+    xs = list(range(0, len(marginal_gains), spacings))
+    ys = marginal_gains[::spacings]
+    for i in range(2):
+        ax = axs[i]
+        ax.plot(xs, ys, label=run_name)
+        ax.set_xlim((0, N))
+        if i == 1:
+            ax.set_yscale('log')
+        ax.set_ylabel('Marginal Gain (dᵢ^2)')
+        ax.set_xlabel('Iterations')
+    fig.suptitle(run_name)
+    fig.tight_layout()
+    save_path = os.path.join(dppmap_save_dir, f'fig_dppmap_marginal_gain_vs_iterations.png')
+    fig.savefig(save_path, bbox_inches='tight', dpi=100)
+    plt.close()
+
+
+    return inds, info, data
+
+    # ## convert `inds` to scores `S`
+    # # assign random data points to the rest of the slots, after `max_length`
+    # inds_left = set(np.arange(N).tolist()) - set(inds)
+    # np.random.seed(0)
+    # inds_left = np.random.permutation(list(inds_left)).tolist()
+    # inds += inds_left
+    # if not len(inds) == N:
+    #     raise ValueError(f'len(inds)={len(inds)} != N={N}')
+    # # points ranked higher in `inds` will have a smaller score
+    # S = np.zeros(N, dtype=np.int64)
+    # for i, ind in enumerate(inds):
+    #     S[ind] = i
+
+
+    # return S, info, data
