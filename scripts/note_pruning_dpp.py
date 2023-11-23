@@ -438,37 +438,84 @@ def compute_dppmap(
     data = {}
     data['marginal_gains'] = marginal_gains
 
-    dppmap_save_dir = os.path.join('dpp', dataset, run_name)
-    os.makedirs(dppmap_save_dir, exist_ok=True)
+    save_dir = os.path.join('dpp', dataset, run_name)
+    os.makedirs(save_dir, exist_ok=True)
 
-    with open(os.path.join(dppmap_save_dir, 'info.json'), 'w') as f:
+    with open(os.path.join(save_dir, 'info.json'), 'w') as f:
         json.dump(info, f, ensure_ascii=False, indent=4)
         
-    with open(os.path.join(dppmap_save_dir, 'data.pkl'), 'wb') as f:
+    with open(os.path.join(save_dir, 'data.pkl'), 'wb') as f:
         pickle.dump(data, f)
 
-    ## Plot dpp map subset size w.r.t. clusters 
+    plt_dppmap_results(Y, inds, marginal_gains, save_dir, run_name, max_length)
+
+
+    ## convert `inds` to scores `S`
+    # assign random data points to the rest of the slots, after `max_length`
+    inds_left = set(np.arange(N).tolist()) - set(inds)
+    np.random.seed(0)
+    inds_left = np.random.permutation(list(inds_left)).tolist()
+    inds += inds_left
+    if not len(inds) == N:
+        raise ValueError(f'len(inds)={len(inds)} != N={N}')
+    # points ranked higher in `inds` will have a smaller score
+    S = np.zeros(N, dtype=np.int64)
+    for i, ind in enumerate(inds):
+        S[ind] = i
+
+
+    return S, info
+
+
+
+def plt_dppmap_results(Y, inds, marginal_gains, save_dir, run_name, max_length):
+
+    inds = inds.copy()
+    marginal_gains = marginal_gains.copy()
+
+    N = len(Y)
+    M = len(inds)
+
+    ## Plot dpp map subset size w.r.t. clusters as a function of M, the kept set size.
+    # 
     if isinstance(Y, torch.Tensor):
         Y = Y.to('cpu').numpy()
+        
+    def first_n_cluster_sizes(n):
+        """Returns number of points belonging to each cluster 
+            for first `n` data points' in dppmap results """
+        Y_first_n = Y[inds[:n]]
+        cluster_sizes = {k: v for k, v in zip(*np.unique(Y_first_n, return_counts=True))}
+        return cluster_sizes
+
     cluster_sizes = {k: v for k, v in zip(*np.unique(Y, return_counts=True))}
-    per_cluster_dppmap_subset = {k: v for k, v in zip(*np.unique(Y[inds], return_counts=True))}
     xs = list(cluster_sizes.keys())
-    fig, ax = plt.subplots(1,1,figsize=(12,4))
-    ys = np.array(list(cluster_sizes.values()))
-    ax.bar(xs, ys, label='Cluster Size')
-    if max_length < ys.max():
-        plt.axhline(y = max_length, color='r', linestyle='--', label='max_length')
-    ys  =np.array([per_cluster_dppmap_subset[i] 
-                if i in per_cluster_dppmap_subset else 0 for i in xs])
-    ax.bar(xs, ys, label=f'{dppmap_type} subset')
-    ax.legend()
-    ax.set_title(f"dppmap subset from each cluster N={N}, M={info['M']}, max_length={max_length}")
+    cluster_sizes = np.array(list(cluster_sizes.values()))
+
+    pct = [0.03, 0.05, 0.1, 0.2, 0.3]
+    first_n_list = [int(x*N) for x in pct] + [M]
+    nrows = len(first_n_list)
+    fig, axs = plt.subplots(nrows, 1, figsize=(12,4*nrows), sharex=True)
+
+    for i, first_n in enumerate(first_n_list):
+        ax = np.array(axs)[i]
+        ax.bar(xs, cluster_sizes, label='Cluster Size')
+        if max_length < cluster_sizes.max():
+            ax.axhline(y = max_length, color='r', linestyle='--', label='max_length')
+        first_n_sizes = first_n_cluster_sizes(first_n)
+        ys  = np.array([first_n_sizes[i] if i in first_n_sizes else 0 for i in xs])
+        ax.bar(xs, ys, label=f'dppmap subset')
+        ax.legend()
+        ax.set_ylabel(f'M={first_n}, pct={round(first_n/N, 3)}', fontsize=20)
+
+    fig.suptitle(f"dppmap subset from each cluster N={N}, M={M}, max_length={max_length}", y=1)
     fig.tight_layout()
-    save_path = os.path.join(dppmap_save_dir, f'fig_dppmap_subset_wrt_clusters.png')
+    save_path = os.path.join(save_dir, f'fig_dppmap_subset_wrt_clusters.png')
     fig.savefig(save_path, bbox_inches='tight', dpi=100)
     plt.close()
 
-    ## plot how marginal gain decays 
+
+    ## plot how marginal gain decays vs. iterations
     spacings = 1000
     fig, axs = plt.subplots(2,1,figsize=(12,6), sharex=True)
     ys = marginal_gains
@@ -484,25 +531,33 @@ def compute_dppmap(
         ax.set_xlabel('Iterations')
     fig.suptitle(run_name)
     fig.tight_layout()
-    save_path = os.path.join(dppmap_save_dir, f'fig_dppmap_marginal_gain_vs_iterations.png')
+    save_path = os.path.join(save_dir, f'fig_dppmap_marginal_gain_vs_iterations.png')
     fig.savefig(save_path, bbox_inches='tight', dpi=100)
     plt.close()
 
 
-    return inds, info, data
+    ## plot marginal gain decays for each cluster.
+    #  can get a better idea if different clusters marginal gain decay at different rate.
+    def get_first_n_marginal_gains_wrt_clusters(n):
+        clusters = np.unique(Y)
+        Y_first_n = Y[inds[:n]]
+        marginal_gains_first_n = np.array(marginal_gains)[:n]
+        marginal_gains_wrt_clusters = {i: marginal_gains_first_n[Y_first_n==i] for i in clusters}
+        return marginal_gains_wrt_clusters
+    marginal_gains_wrt_clusters = get_first_n_marginal_gains_wrt_clusters(M)
+    fig, axs = plt.subplots(2,1,figsize=(12,6), sharex=True)
+    for axi in range(2):
+        ax = axs[axi]
+        for i, ys in marginal_gains_wrt_clusters.items():
+            ax.plot(ys, label=f'Cluster {i}')
+        ax.set_ylabel('Marginal Gain (dᵢ^2)')
+        if axi == 1:
+            ax.set_yscale('log')
+    axs[-1].set_xlabel('dppmap subset size (w.r.t clusters)')
+    fig.suptitle(f'Marginal gains decay in each cluster ({run_name})')
+    fig.tight_layout()
+    save_path = os.path.join(save_dir, f'fig_dppmap_marginal_gain_clusterwise.png')
+    fig.savefig(save_path, bbox_inches='tight', dpi=100)
+    plt.close()
 
-    # ## convert `inds` to scores `S`
-    # # assign random data points to the rest of the slots, after `max_length`
-    # inds_left = set(np.arange(N).tolist()) - set(inds)
-    # np.random.seed(0)
-    # inds_left = np.random.permutation(list(inds_left)).tolist()
-    # inds += inds_left
-    # if not len(inds) == N:
-    #     raise ValueError(f'len(inds)={len(inds)} != N={N}')
-    # # points ranked higher in `inds` will have a smaller score
-    # S = np.zeros(N, dtype=np.int64)
-    # for i, ind in enumerate(inds):
-    #     S[ind] = i
 
-
-    # return S, info, data
