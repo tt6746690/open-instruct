@@ -244,8 +244,8 @@ def torch_dppmap_memefficient(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
     inds = []
     j = torch.argmax(di2s).item()
     inds.append(j)
+    marginal_gains.append(di2s[j].item())
     for _ in tqdm(range(M-1)):
-        marginal_gains.append(di2s[j].item())
         k = len(inds) - 1
         # (k,)
         ci_optimal = cis[:k, j]
@@ -265,6 +265,7 @@ def torch_dppmap_memefficient(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
                 print(f'Stop on dᵢ^2 = {di2s[j]}. len(inds)={len(inds)} / {N}')
             break
         inds.append(j)
+        marginal_gains.append(di2s[j].item())
 
     return inds, marginal_gains
 
