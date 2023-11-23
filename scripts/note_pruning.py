@@ -327,6 +327,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         pkl_extra['info'] = output
     elif sort_by.startswith('dppmapbd'):
         import note_pruning_clustering
+        import note_pruning_dpp
         kvs = parse_kv_from_string(sort_by)
         md = kvs['kmd']
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
@@ -351,12 +352,12 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             'quality_score_embed_model': kvs.get('qmd', None),
             'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
             'device': 'cuda',
-            'max_length': int((.3*N) / kvs['nc']), 
+            'max_length': 5_000, # per-cluster max length. 
         }
         clustering_fn = create_string_from_kv({
             'cl': kvs.get('cl', 'kmeansfaisscd'),
             'md': kwargs['kernel_embed_model'],
-            'emb': kwargs['kernel_embed_type'],
+            'emb': kvs['kemb'] if 'kemb' in kvs else 'text+embedding',
             'nc': kvs['nc'],
         })
         save_dir_clustering = os.path.join(
