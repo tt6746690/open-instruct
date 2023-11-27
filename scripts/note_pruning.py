@@ -324,6 +324,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
             'device': 'cuda',
             'max_length': min(50_000, .5*N), # balance finish job within 6 hrs with wanting to prune a lot
+            'run_name': sort_by,
         }
         print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
         S, output = note_pruning_dpp.compute_dppmap(**kwargs)
@@ -354,6 +355,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
             'device': 'cuda',
             'max_length': 5_000, # per-cluster max length. 
+            'run_name': sort_by,
         }
         clustering_fn = create_string_from_kv({
             'cl': kvs.get('cl', 'kmeansfaisscd'),
@@ -389,7 +391,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         S, output = note_pruning_dpp.compute_dppmap(**kwargs)
         pkl_extra['info'] = output
     elif sort_by.startswith('rho'):
-        if sort_by == 'rhov1':
+        if sort_by == 'rhov1': 
             model_names = ['mistral-7b+lora:r=256:a=256',
                            'mistral-7b-ultrachat200k-v1+lora:r=256:a=256']
             assert(model_name == model_names[0])
