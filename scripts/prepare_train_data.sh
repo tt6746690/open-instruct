@@ -143,6 +143,8 @@ python scripts/split_sharegpt_conversations.py \
 # # reformat ultrachat 200k
 python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset ultrachat
 
+## format starcoder data
+python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset starcoder
 
 
 

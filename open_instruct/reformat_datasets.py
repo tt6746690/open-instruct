@@ -334,6 +334,37 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False):
             }) + "\n")
 
 
+def convert_starcoder_data(data_dir, output_dir):
+    filenames = [
+        'random_role.json',
+        'random_simple.json',
+        'role.json',
+        'simple.json',
+    ]
+    for filename in filenames:
+        with open(os.path.join(data_dir, filename), 'r') as f:
+            examples = json.load(f)
+
+        output_path = os.path.join(output_dir, 'starcoder_'+filename.split('.')[0]+'.jsonl')
+        with open(output_path, "w") as fout:
+            for idx, example in enumerate(examples):
+                encoded_example = encode_instruction_example(
+                    instruction=example["instruction"], 
+                    input=example["input"], 
+                    output=example["output"],
+                    random_template=True,
+                    eos_token=None
+                )
+                fout.write(json.dumps({
+                    "dataset": "starcoder",
+                    "id": f"starcoder_{idx}",
+                    "messages": [
+                        {"role": "user", "content": encoded_example["prompt"]},
+                        {"role": "assistant", "content": encoded_example["completion"]},
+                    ]
+                }) + "\n")
+
+
 def convert_sharegpt_data(data_dir, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
