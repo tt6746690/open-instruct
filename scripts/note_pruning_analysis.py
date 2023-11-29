@@ -81,6 +81,8 @@ def get_dataset(dataset, processed=True):
                     train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_train_data.jsonl')
                 else:
                     train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
+            elif 'starcoder' in dataset:
+                train_file = os.path.join(processed_dir, 'starcoder', f'{dataset}.jsonl')
             else:
                 train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
         else:
@@ -90,6 +92,8 @@ def get_dataset(dataset, processed=True):
                 train_file = os.path.join(data_raw_dir, 'flan2022', f'{dataset}.jsonl')
             elif 'tulu' in dataset:
                 train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.jsonl')
+            elif 'starcoder' in dataset:
+                train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.json')
             else:
                 train_file = os.path.join(data_raw_dir, dataset)
     ds = load_dataset(
