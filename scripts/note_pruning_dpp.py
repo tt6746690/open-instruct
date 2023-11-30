@@ -21,6 +21,48 @@ from dpp import dpp
 
 from note_pruning_analysis import get_lm_output
 
+
+
+def get_ifd(dataset, model_name):
+    """Assumes ran both `sft` and `output` encode_fn_type when generating model output.
+        Here `log_prob` is length-normalized negative log prob: - 1/(|x|) Σₜ log p(x_t|x_<t)
+            - encode_fn_type="sft":     -1/|y| Σₜ log p(y_t|y_<t,x) = log_PPL(y|x)
+            - encode_fn_tyee="output":  -1/|y| Σₜ log p(y_t|y_<t)   = log_PPL(y)
+        IFD = log_PPL(y|x) / log_PPL(y) = log p(y|x) / log p(y)
+            that is perfectly negatively rank correlated with point-wise mutual information.
+    """
+    ds = {}
+    for x in ['sft', 'output']:
+        ds[x] = get_lm_output(dataset, model_name, encode_fn_type=x, return_text_embedding=False)
+    log_ppl_yx = ds['sft']['log_prob'].squeeze()
+    log_ppl_y = ds['output']['log_prob'].squeeze()
+    ifd = log_ppl_yx / (log_ppl_y+1e-8)
+    return {'log_ppl_yx': log_ppl_yx,
+            'log_ppl_y': log_ppl_y,
+            'ifd': ifd,}
+
+
+def plt_ifd_simulation():
+    import scipy
+    import matplotlib.pyplot as plt
+
+    pyx = .5
+    py = np.linspace(0+0.01, 1-0.01, 100)
+
+    v1 = np.log(pyx) / np.log(py)
+    v2 = pyx/py
+    print(scipy.stats.spearmanr(v1,v2).statistic)
+
+    fig, ax = plt.subplots(1,1,figsize=(5,5))
+    ax.plot(py, np.log(pyx) / np.log(py), label='ifd')
+    ax.plot(py, pyx / py, label='p(y|x)/p(y)')
+    ax.plot(py, pyx / (1-py), label='pyx / (1-py)')
+    ax.set_yscale('log')
+    ax.set_xlabel('p(y)')
+    ax.legend()
+
+
+
 def sq_distances(X,Y=None):
     """ Returns K where Kij = ||X_i - Y_j||^2 """
     assert(X.ndim==2)
@@ -310,18 +352,26 @@ def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None):
             Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=Xi, Q=Qi)
             inds, marginal_gains = torch_dppmap_memefficient(
                 Ki_fn, Kd_fn, Ni, Mi, verbose=True)
-            inds_list += inds_global[np.array(inds)].tolist()
+            inds = inds_global[np.array(inds)].tolist()
+            inds_list += inds
             marginal_gains_list += marginal_gains
+            if len(inds) != len(marginal_gains):
+                raise ValueError(f'cluster={i}: len(inds)={len(inds)} != len(marginal_gains)={len(marginal_gains)}')
+            num_inf = np.sum(np.isinf(marginal_gains))
+            num_nan = np.sum(np.isnan(marginal_gains))
+            if num_inf!=0 or num_nan!=0:
+                raise ValueError(f'cluster={i}: marginal_gains has num_inf={num_inf}, num_nan={num_nan}')
             # if i == 2: break
         ## Use `marginal_gains` to rank points cross clusters 
         # so that points with higher marginal gains appears at the front of the list
         inds, marginal_gains = inds_list, marginal_gains_list
         if len(inds)!=len(marginal_gains):
-            raise ValueError(f'len(inds)={len(inds)} != len(marginal_gains)={len(marginal_gains)}')
+            raise ValueError(f'len(inds)={len(inds)} != len(marginal_gains)={len(marginal_gains)}\n\n inds={inds}\n\n marginal_gains={marginal_gains}')
         inds, marginal_gains = zip(*[(i, v) for i, v in sorted(
             zip(inds, marginal_gains), key=lambda x: x[1], reverse=True)])
         inds, marginal_gains = list(inds), list(marginal_gains)
-        assert(all([x==y for x, y in zip(marginal_gains, sorted(marginal_gains, reverse=True))]))
+        if not all([x==y for x, y in zip(marginal_gains, sorted(marginal_gains, reverse=True))]):
+            raise ValueError(f'marginal_gains not sorted\n\n marginal_gains={marginal_gains}')
         output = inds, marginal_gains
     else:
         raise ValueError(f'dppmap_type={dppmap_type} not implemented.')
@@ -337,6 +387,8 @@ def get_full_model_name(md):
         model_name = 'llama-7b+lora:r=256:a=256'
     elif md == 'mistral7b':
         model_name = 'mistral-7b+lora:r=256:a=256'
+    elif md == 'llama7b+lima':
+        model_name = 'llama-7b+lima+lora:r=256:a=256'
     else:
         raise ValueError(f'Dont know full name for model_name={md}')
     return model_name
@@ -374,7 +426,7 @@ def compute_dppmap(
     if kernel_embed_model not in ['mpnet', 'bge', 'llama7b', 'mistral7b']:
         raise ValueError(f'kernel_embed_model={kernel_embed_model} not supported.')
     if theta != 0. and \
-        quality_score_embed_model not in ['mpnet', 'bge', 'llama7b', 'mistral7b']:
+        quality_score_embed_model not in ['mpnet', 'bge', 'llama7b', 'mistral7b', 'llama7b+lima']:
         # if theta!=0, then we're using quality score and so need to specify model
         raise ValueError(f'quality_score_embed_model={quality_score_embed_model} not supported.')
     if kernel_embed_type not in ['text_embedding', 'grad_rp_loraB']:
@@ -393,6 +445,9 @@ def compute_dppmap(
 
     if quality_score_type is None:
         Q = torch.ones([1], device=device).expand(len(X))
+    elif quality_score_type == 'ifd':
+        Q = get_ifd(dataset, get_full_model_name(quality_score_embed_model))['ifd']
+        Q = torch.from_numpy(Q).to(device)
     else:
         dq = get_lm_output(
             dataset, 

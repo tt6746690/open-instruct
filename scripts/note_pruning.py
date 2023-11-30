@@ -243,6 +243,9 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             print(f'sort_by={sort_by} not in model output: ({dataset}, {model_name})')
             return
         S = np.nan_to_num(d[sort_by], nan=np.nanmean(d[sort_by])).squeeze()
+    elif sort_by.startswith('ifd'):
+        print(f'encode_fn_type={encode_fn_type} not used! since sort_by={sort_by}')
+        S = note_pruning_dpp.get_ifd(dataset, model_name)['ifd']
     elif sort_by.startswith('random'):
         match = re.search(r's=(\d+)', sort_by)
         seed = int(match.group(1))
