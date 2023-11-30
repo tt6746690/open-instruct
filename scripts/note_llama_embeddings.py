@@ -501,12 +501,11 @@ def compute_lm_outputs(
             # add eos token to causal models, e.g., llama, since its not added by default.
             add_eos_token=False if any(y in model_name_or_path for y in ['mpnet', 'bge']) else True,
         )
-    elif encode_fn_type == 'sft':    
+    elif encode_fn_type == 'sft':
         encode_function = partial(
             encode_with_messages_format,
             tokenizer=tokenizer,
             max_seq_length=max_seq_len,
-            add_eos_token=False,
         )
     else:
         raise ValueError(f'encode_fn_type={encode_fn_type} not implemented.')
