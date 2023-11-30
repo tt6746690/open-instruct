@@ -25,17 +25,25 @@ from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
 
 
-def encode_just_one_role(example, tokenizer, max_seq_length, encode_fn_type):
+def encode_just_one_role(example, tokenizer, max_seq_length, encode_fn_type, add_eos_token):
     """Takes first-turn conversation and encode it as a single sequence."""
     messages = example['messages']
     assert(len(messages) >= 2)
-    
+
+    # if single-turn, take the message
+    # if multi-turn, join the messages with '\n\n'
     if encode_fn_type == 'input':
-        text = messages[0]['content']
+        contents = [x['content'] for x in messages if x['role']=='user']
+        text = '\n\n'.join(contents)
     elif encode_fn_type == 'output':
-        text = messages[1]['content']
+        contents = [x['content'] for x in messages if x['role']=='assistant']
+        text = '\n\n'.join(contents)
     else:
-        raise ValueError(f'encode_fn_type={encode_fn_type} not supported.')
+        raise ValueError(f'encode_fn_type={encode_fn_type} not supported.') 
+        
+    if add_eos_token:
+        text += tokenizer.eos_token
+
     tokenized_example = tokenizer(
         text, return_tensors='pt', max_length=max_seq_length, truncation=True)
     input_ids = tokenized_example.input_ids
@@ -489,12 +497,17 @@ def compute_lm_outputs(
             encode_just_one_role,
             tokenizer=tokenizer,
             max_seq_length=max_seq_len,
-            encode_fn_type=encode_fn_type)
+            encode_fn_type=encode_fn_type,
+            # add eos token to causal models, e.g., llama, since its not added by default.
+            add_eos_token=False if any(y in model_name_or_path for y in ['mpnet', 'bge']) else True,
+        )
     elif encode_fn_type == 'sft':    
         encode_function = partial(
             encode_with_messages_format,
             tokenizer=tokenizer,
-            max_seq_length=max_seq_len)
+            max_seq_length=max_seq_len,
+            add_eos_token=False,
+        )
     else:
         raise ValueError(f'encode_fn_type={encode_fn_type} not implemented.')
 
