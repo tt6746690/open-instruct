@@ -334,24 +334,88 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False):
             }) + "\n")
 
 
+def clean_starcoder_data(data_dir, filename):
+    """Some data cleaning."""
+
+    if filename not in ['commentinstr.json']:
+        return None
+
+    from datasets import load_dataset
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained('/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/codellama/CodeLlama-7b-hf')
+
+    ds = load_dataset('json', data_files={'train': os.path.join(data_dir, filename)}, 
+             split='train', cache_dir=data_dir)
+
+    def docstring_startswith_args(example):
+        return example['docstring'][:10].lower().startswith('args')
+    ds = ds.filter(lambda x: not docstring_startswith_args(x), num_proc=8)
+    def code_endsin_pass(example):
+        return example['code'][-10:].lower().endswith('pass')
+    ds = ds.filter(lambda x: not code_endsin_pass(x), num_proc=8)
+    def tokenize_fn(example):
+        example.update({
+            'instruction_'+k: v for k, v in 
+            tokenizer(example['docstring'], truncation=False).items()
+        })
+        example.update({
+            'output_'+k: v for k, v in 
+            tokenizer(example['code'], truncation=False).items()
+        })
+        example.update({
+            'numtoks_instruction': len(example['instruction_input_ids']),
+            'numtoks_output': len(example['output_input_ids']),
+        })
+        return example
+    ds = ds.map(tokenize_fn, num_proc=8)
+    def text_within_reasonable_range(example):
+        """Removes
+            - empty or uninformative instructions 
+            - instruction, output pair that is too long.
+            - functions that is not implemented.
+        """
+        return example['numtoks_instruction'] >= 5 and \
+            example['numtoks_instruction'] + example['numtoks_output'] <= 2024 and \
+            example['numtoks_output'] >= 40
+    ds = ds.filter(text_within_reasonable_range, num_proc=8)
+    ds = ds.rename_columns({'docstring': 'instruction', 'code': 'output'})
+    ds = ds.map(lambda _: {'input': ""}, num_proc=8)
+    ds = ds.select_columns(['instruction', 'input', 'output'])
+    filename_cleaned = f"{filename.split('.json')[0]}_cleaned.jsonl"
+    ds.to_json(os.path.join(data_dir, filename_cleaned))
+    return filename_cleaned
+
+
 def convert_starcoder_data(data_dir, output_dir):
     filenames = [
-        'random_role.json',
-        'random_simple.json',
-        'role.json',
-        'simple.json',
+        # 'random_role.json',
+        # 'random_simple.json',
+        # 'role.json',
+        # 'simple.json',
+        'commentinstr.json',
     ]
+    filenames += [clean_starcoder_data(data_dir, filename) for filename in filenames]
+    filenames = [x for x in filenames if x is not None]
+    print('cleaned filenames:', filenames)
+
     for filename in filenames:
         with open(os.path.join(data_dir, filename), 'r') as f:
-            examples = json.load(f)
+            if filename.endswith('jsonl'):
+                examples = [json.loads(l) for l in f]
+            else:
+                examples = json.load(f)
 
         output_path = os.path.join(output_dir, 'starcoder_'+filename.split('.')[0]+'.jsonl')
         with open(output_path, "w") as fout:
             for idx, example in enumerate(examples):
+                if filename == 'commentinstr.json':
+                    instruction, input, output = example['docstring'], "", example['code']
+                else:
+                    instruction, input, output = example['instruction'], example['input'], example['output']
                 encoded_example = encode_instruction_example(
-                    instruction=example["instruction"], 
-                    input=example["input"], 
-                    output=example["output"],
+                    instruction=instruction, 
+                    input=input, 
+                    output=output,
                     random_template=True,
                     eos_token=None
                 )
