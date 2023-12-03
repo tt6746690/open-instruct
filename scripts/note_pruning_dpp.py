@@ -515,7 +515,7 @@ def compute_dppmap(
     with open(os.path.join(save_dir, 'data.pkl'), 'wb') as f:
         pickle.dump(data, f)
 
-    plt_dppmap_results(Y, inds, marginal_gains, save_dir, run_name, max_length)
+    plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_length)
 
 
     ## convert `inds` to scores `S`
@@ -536,13 +536,36 @@ def compute_dppmap(
 
 
 
-def plt_dppmap_results(Y, inds, marginal_gains, save_dir, run_name, max_length):
+def plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_length):
 
     inds = inds.copy()
     marginal_gains = marginal_gains.copy()
 
-    N = len(Y)
     M = len(inds)
+
+    ## plot how marginal gain decays vs. iterations
+    spacings = 1000
+    fig, axs = plt.subplots(2,1,figsize=(12,6), sharex=True)
+    ys = marginal_gains
+    xs = list(range(0, len(marginal_gains), spacings))
+    ys = marginal_gains[::spacings]
+    for i in range(2):
+        ax = axs[i]
+        ax.plot(xs, ys, label=run_name)
+        ax.set_xlim((0, N))
+        if i == 1:
+            ax.set_yscale('log')
+        ax.set_ylabel('Marginal Gain (dᵢ^2)')
+        ax.set_xlabel('Iterations')
+    fig.suptitle(run_name)
+    fig.tight_layout()
+    save_path = os.path.join(save_dir, f'fig_dppmap_marginal_gain_vs_iterations.png')
+    fig.savefig(save_path, bbox_inches='tight', dpi=100)
+    plt.close()
+
+    ## subsequent plots requires `Y` to be provided
+    if Y is None: 
+        return
 
     ## Plot dpp map subset size w.r.t. clusters as a function of M, the kept set size.
     # 
@@ -581,28 +604,6 @@ def plt_dppmap_results(Y, inds, marginal_gains, save_dir, run_name, max_length):
     save_path = os.path.join(save_dir, f'fig_dppmap_subset_wrt_clusters.png')
     fig.savefig(save_path, bbox_inches='tight', dpi=100)
     plt.close()
-
-
-    ## plot how marginal gain decays vs. iterations
-    spacings = 1000
-    fig, axs = plt.subplots(2,1,figsize=(12,6), sharex=True)
-    ys = marginal_gains
-    xs = list(range(0, len(marginal_gains), spacings))
-    ys = marginal_gains[::spacings]
-    for i in range(2):
-        ax = axs[i]
-        ax.plot(xs, ys, label=run_name)
-        ax.set_xlim((0, N))
-        if i == 1:
-            ax.set_yscale('log')
-        ax.set_ylabel('Marginal Gain (dᵢ^2)')
-        ax.set_xlabel('Iterations')
-    fig.suptitle(run_name)
-    fig.tight_layout()
-    save_path = os.path.join(save_dir, f'fig_dppmap_marginal_gain_vs_iterations.png')
-    fig.savefig(save_path, bbox_inches='tight', dpi=100)
-    plt.close()
-
 
     ## plot marginal gain decays for each cluster.
     #  can get a better idea if different clusters marginal gain decay at different rate.
