@@ -93,7 +93,7 @@ def get_dataset(dataset, processed=True):
             elif 'tulu' in dataset:
                 train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.jsonl')
             elif 'starcoder' in dataset:
-                train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.json')
+                train_file = os.path.join(data_raw_dir, 'starcoder', f'{dataset}.json')
             else:
                 train_file = os.path.join(data_raw_dir, dataset)
     ds = load_dataset(
@@ -126,13 +126,28 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None):
             'output_len': ds['output_len']}
 
 
+
+def get_full_model_name(md):
+    if md == 'mpnet':
+        model_name = 'all-mpnet-base-v2'
+    elif md == 'bge':
+        model_name = 'bge-large-en-v1.5'
+    elif md == 'llama7b':
+        model_name = 'llama-7b+lora:r=256:a=256'
+    elif md == 'mistral7b':
+        model_name = 'mistral-7b+lora:r=256:a=256'
+    elif md == 'llama7b+lima':
+        model_name = 'llama-7b+lima+lora:r=256:a=256'
+    else:
+        raise ValueError(f'Dont know full name for model_name: {md}')
+    return model_name
+
+
+
 def get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embedding=True, fill_nan=True):
     """`model_name` is name of directory under `model_outputs`. """
-    if encode_fn_type != 'sft':
-        save_path = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}.pkl')
-    else:
-        save_path = os.path.join(lm_output_dir, model_name, f'{dataset}.pkl')
-    
+    save_path = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}.pkl')
+
     if os.path.isfile(save_path):
         with open(save_path, 'rb') as f:
             output = pickle.load(f)
@@ -141,10 +156,7 @@ def get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embeddi
             ## concat ultrachat data shards.
             output = {}
             for i in range(10):
-                if encode_fn_type != 'sft':
-                    save_path_shard = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}_{i}.pkl')
-                else:
-                    save_path_shard = os.path.join(lm_output_dir, model_name, f'{dataset}_{i}.pkl')
+                save_path_shard = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}_{i}.pkl')
                 with open(save_path_shard, 'rb') as f:
                     output_i = pickle.load(f)
                     for k, v in output_i.items():
@@ -395,3 +407,39 @@ def flatten_dict(d, parent_key='', sep='_'):
         else:
             items.append((new_key, v))
     return dict(items)
+
+
+
+
+def save_text_viz_for_curriculum(path):
+    """Saves some text snippets for visualization for a curriculum. """
+    from note_curriculum import get_curriculum_scores
+    num_examples = 400
+    portion_list = [
+        f'sorted_beg_num={num_examples}',
+        f'sorted_end_num={num_examples}',
+        f'sorted_partition=1:10_num={num_examples}',
+        f'sorted_partition=10:10_num={num_examples}',
+        f'sorted_partition=2:3_num={num_examples}',
+        f'sorted_random_num={num_examples}',
+    ]
+    output = get_curriculum_scores(path)
+    scores = output['scores']
+    dataset = output['dataset']
+    
+    ds = get_dataset(dataset)
+    for portion in portion_list:
+        # sample subsets for printing
+        inds = sample_indices_given_scores(scores, portion)
+        def add_score_fn(example, idx):
+            example.update({'score': scores[inds[idx]]})
+            return example
+        ds_subset = ds.select(inds).map(add_score_fn, with_indices=True, keep_in_memory=True)
+        write_ds_to_file_for_reading(
+            dataset=ds_subset, 
+            output_path=os.path.join('text_viz', os.path.dirname(path), f'{portion}.txt'),
+            num_examples=num_examples)
+
+
+
+

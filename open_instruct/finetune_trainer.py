@@ -642,6 +642,7 @@ def main():
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
             streaming=data_args.streaming,
+            download_mode=datasets.GenerateMode.FORCE_REDOWNLOAD if data_args.overwrite_cache else datasets.GenerateMode.REUSE_DATASET_IF_EXISTS,
         )
     else: 
         data_files = {}
@@ -760,7 +761,6 @@ def main():
         assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
     elif isinstance(tokenizer, (GPT2Tokenizer, GPT2TokenizerFast)) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
-    ## wpq: add support for gpt2 tokenizer.
     elif isinstance(tokenizer, (GPT2Tokenizer, GPT2TokenizerFast)):
         num_added_tokens = tokenizer.add_special_tokens({
             "pad_token": "<pad>",
