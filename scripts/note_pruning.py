@@ -11,7 +11,7 @@ import torch
 from transformers import AutoTokenizer
 
 from rosemary import parse_kv_from_string, create_string_from_kv
-from note_pruning_analysis import lm_output_dir, get_dataset_token_lengths
+from note_pruning_analysis import lm_output_dir, get_dataset_token_lengths, save_text_viz_for_curriculum
 
 import note_pruning_dpp
 import note_pruning_clustering
@@ -216,6 +216,7 @@ def save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, datase
             save_path = os.path.join(curriculum_output_dir, 'scores.pkl')
             output = {'S': -S if pacing_fn.endswith('_neg') else S}
             save_to_pickle(save_path=save_path, output=output)
+            save_text_viz_for_curriculum(save_path)
 
 
 def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
@@ -245,7 +246,10 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         S = np.nan_to_num(d[sort_by], nan=np.nanmean(d[sort_by])).squeeze()
     elif sort_by.startswith('ifd'):
         print(f'encode_fn_type={encode_fn_type} not used! since sort_by={sort_by}')
-        S = note_pruning_dpp.get_ifd(dataset, model_name)['ifd']
+        S = note_pruning_dpp.get_ifd_and_pmi(dataset, model_name)['ifd']
+    elif sort_by.startswith('log_pmi'):
+        print(f'encode_fn_type={encode_fn_type} not used! since sort_by={sort_by}')
+        S = note_pruning_dpp.get_ifd_and_pmi(dataset, model_name)['log_pmi']
     elif sort_by.startswith('random'):
         match = re.search(r's=(\d+)', sort_by)
         seed = int(match.group(1))

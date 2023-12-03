@@ -12,6 +12,7 @@ from dppy.finite_dpps import FiniteDPP
 
 import pyarrow # add before importing torch
 import torch
+from transformers import AutoTokenizer
 
 import matplotlib.pyplot as plt
 
@@ -19,27 +20,55 @@ import sys
 sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
 from dpp import dpp
 
-from note_pruning_analysis import get_lm_output
+from note_pruning_analysis import get_lm_output, get_dataset, get_full_model_name, scripts_dir
 
 
 
-def get_ifd(dataset, model_name):
+def get_ifd_and_pmi(dataset, model_name):
     """Assumes ran both `sft` and `output` encode_fn_type when generating model output.
         Here `log_prob` is length-normalized negative log prob: - 1/(|x|) Σₜ log p(x_t|x_<t)
-            - encode_fn_type="sft":     -1/|y| Σₜ log p(y_t|y_<t,x) = log_PPL(y|x)
-            - encode_fn_tyee="output":  -1/|y| Σₜ log p(y_t|y_<t)   = log_PPL(y)
+            - encode_fn_type="sft":     -1/|y| Σₜ log p(y_t|y_<t,x) = -1/|y| log p(y|x) = log_PPL(y|x)
+            - encode_fn_tyee="output":  -1/|y| Σₜ log p(y_t|y_<t)   = -1/|y| log p(y)   = log_PPL(y)
         IFD = log_PPL(y|x) / log_PPL(y) = log p(y|x) / log p(y)
+        PMI = p(y|x) / p(y) = exp( log p(y|x) - log p(y) )
             that is perfectly negatively rank correlated with point-wise mutual information.
-    """
-    ds = {}
+    """ 
+    if model_name.startswith('llama-7b'):
+        model_name_or_path = os.path.join(
+            scripts_dir, 'results', 'baselines', 'huggyllama/llama-7b')
+    elif model_name.startswith('codellama-7b'):
+        model_name_or_path = os.path.join(
+            scripts_dir, 'results', 'baselines', 'codellama/CodeLlama-7b-hf')
+    elif model_name.startswith('mistral-7b'):
+        model_name_or_path = os.path.join(
+            scripts_dir, 'results', 'baselines', 'mistralai/Mistral-7B-Instruct-v0.1')
+    else:
+        raise ValueError(f'Cannot find corresponding `model_name_or_path` for model_name: {model_name}')
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    ds = get_dataset(dataset)
+    def count_numtoks(example):
+        output = [x['content'] for i, x in enumerate(example['messages']) if i%2==1]
+        output = '\n'.join(output)
+        numtoks_output = len(tokenizer(output, max_length=2048, truncation=True)['input_ids'])
+        return {'numtoks_output': numtoks_output}
+    ds = ds.map(count_numtoks, num_proc=8)
+    numtoks_output = ds['numtoks_output']
+    numtoks_output = np.maximum(numtoks_output, 1) # in case numtoks=0
+
+    outputs = {}
     for x in ['sft', 'output']:
-        ds[x] = get_lm_output(dataset, model_name, encode_fn_type=x, return_text_embedding=False)
-    log_ppl_yx = ds['sft']['log_prob'].squeeze()
-    log_ppl_y = ds['output']['log_prob'].squeeze()
+        outputs[x] = get_lm_output(dataset, model_name, encode_fn_type=x, return_text_embedding=False)
+    log_ppl_yx = outputs['sft']['log_prob'].squeeze()
+    log_ppl_y = outputs['output']['log_prob'].squeeze()
+
     ifd = log_ppl_yx / (log_ppl_y+1e-8)
+    log_pyx = (-log_ppl_yx * numtoks_output)
+    log_py = (-log_ppl_y * numtoks_output)
+    log_pmi = log_pyx - log_py
     return {'log_ppl_yx': log_ppl_yx,
             'log_ppl_y': log_ppl_y,
-            'ifd': ifd,}
+            'ifd': ifd,
+            'log_pmi': log_pmi,}
 
 
 def plt_ifd_simulation():
@@ -376,22 +405,6 @@ def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None):
     else:
         raise ValueError(f'dppmap_type={dppmap_type} not implemented.')
     return output
-
-
-def get_full_model_name(md):
-    if md == 'mpnet':
-        model_name = 'all-mpnet-base-v2'
-    elif md == 'bge':
-        model_name = 'bge-large-en-v1.5'
-    elif md == 'llama7b':
-        model_name = 'llama-7b+lora:r=256:a=256'
-    elif md == 'mistral7b':
-        model_name = 'mistral-7b+lora:r=256:a=256'
-    elif md == 'llama7b+lima':
-        model_name = 'llama-7b+lima+lora:r=256:a=256'
-    else:
-        raise ValueError(f'Dont know full name for model_name={md}')
-    return model_name
 
 
 
