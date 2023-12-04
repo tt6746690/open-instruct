@@ -459,8 +459,14 @@ def compute_dppmap(
     if quality_score_type is None:
         Q = torch.ones([1], device=device).expand(len(X))
     elif quality_score_type == 'ifd':
-        Q = get_ifd(dataset, get_full_model_name(quality_score_embed_model))['ifd']
+        Q = get_ifd_and_pmi(dataset, get_full_model_name(quality_score_embed_model))['ifd']
         Q = torch.from_numpy(Q).to(device)
+    elif quality_score_type.startswith('log_pmi'): # higher is better!
+        Q = get_ifd_and_pmi(dataset, get_full_model_name(quality_score_embed_model))['log_pmi']
+        q_lower, q_mid, q_upper = np.quantile(Q, .01), np.quantile(Q, .5),  np.quantile(Q, .99)
+        Q = (Q-q_lower) / (q_upper-q_lower)
+        print(f'linearly transform Q=log_pmi s.t. prev value=[{q_lower:.2f}, {q_mid:.2f}, {q_upper:.2f}] -> [0, {np.mean(Q):.2f}, 1]\n')
+        Q = torch.from_numpy(Q).to(device) 
     else:
         dq = get_lm_output(
             dataset, 
