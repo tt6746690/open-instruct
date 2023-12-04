@@ -134,6 +134,8 @@ def get_full_model_name(md):
         model_name = 'bge-large-en-v1.5'
     elif md == 'llama7b':
         model_name = 'llama-7b+lora:r=256:a=256'
+    elif md == 'codellama7b':
+        model_name = 'codellama-7b+lora:r=256:a=256'
     elif md == 'mistral7b':
         model_name = 'mistral-7b+lora:r=256:a=256'
     elif md == 'llama7b+lima':
