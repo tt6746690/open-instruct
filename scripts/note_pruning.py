@@ -84,6 +84,7 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
     return D, kmeans
 
 
+
 def cholesky_jitter(K, jitter=1e-5):
     K[np.diag_indices_from(K)] += jitter
     return K
@@ -303,6 +304,24 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         X, Y, C = note_pruning_clustering.main(**kwargs)
         print('Apply SemDeDup to discard duplicates.')
         S = note_pruning_clustering.semdedup(X, Y, dist=dist, device='cuda')
+    elif sort_by.startswith('dedup'):
+        kvs = parse_kv_from_string(sort_by)
+        md = kvs['md']
+        if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
+        (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
+        (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
+        (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')):
+            raise ValueError(f'md={md} does not match with model_name={model_name}')
+        if md in ['mpnet', 'bge']:
+            normalize_embeddings = True
+            dist = 'cd'
+        else:
+            normalize_embeddings = False
+            dist = 'l2'
+        embed_type = re.sub(r'[+]', '_', kvs['emb'])
+        X = d[embed_type]
+        Y = np.zeros(X.shape[0])
+        S = note_pruning_clustering.semdedup(X, Y, dist=dist, device='cpu')
     elif sort_by.startswith('dpp_'):
         match = re.search(r'k=(\w+)', sort_by)
         kernel_type = match.group(1) if match else None
