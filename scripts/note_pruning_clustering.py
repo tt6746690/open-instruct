@@ -133,6 +133,23 @@ def get_dist_fn(dist):
         return lambda x1, x2: torch.cdist(x1, x2, p=2.0)
     else:
         raise ValueError(f'dist_fn={dist} not supported.')
+    
+
+def np_pairwise_cosine_similarity(a, b, eps=1e-8):
+    if a.ndim == 1:
+        a = a.reshape(1, -1)
+    if b.ndim == 1:
+        b = b.reshape(1, -1)
+    a_norm = np.linalg.norm(a, axis=1, keepdims=True)
+    b_norm = np.linalg.norm(b, axis=1, keepdims=True)
+    a_norm = a / np.maximum(a_norm, eps * np.ones_like(a_norm))
+    b_norm = b / np.maximum(b_norm, eps * np.ones_like(b_norm))
+    S = a_norm@b_norm.T
+    return S
+
+def np_pairwise_cosine_distance(a, b, eps=1e-8):
+    return 1 - np_pairwise_cosine_similarity(a, b, eps=eps)
+
 
 
 def clustering_dist_to_centroids(X, Y, C, dist='cd', device='cuda'):
@@ -228,7 +245,6 @@ def clustering_algorithm_scores(X, Y):
     return scores
 
 
-
 def bisect_eps(fn, target_size, eps_low, eps_high, tol=1e-8):
     while eps_high - eps_low > tol:
         eps_mid = (eps_low + eps_high) / 2
@@ -264,10 +280,11 @@ def semdedup(X, Y, dist='cd', device='cuda'):
         Di = dist_fn(Xi, Xi)
         eps_low = min(eps_low, Di.min().item())
         eps_high = max(eps_high, Di.max().item())
-        Di.fill_diagonal_(0.0)
-        Di_triu = torch.triu(Di, diagonal=1)
-        Di_triu[torch.tril(torch.ones_like(Di_triu)).bool()] = float('inf')
-        D = torch.min(Di_triu, dim=0)[0]
+        Di.triu_(diagonal=1)
+        tril_mask = torch.ones(Di.shape, dtype=torch.bool)
+        tril_mask.tril_()
+        Di[tril_mask] = float('inf')
+        D = torch.min(Di, dim=0)[0]
         D = D.to('cpu')
         Ds.append(D)
         Is.append(inds_global)
