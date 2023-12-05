@@ -5,6 +5,8 @@ import json
 import pickle
 import numpy as np
 from functools import partial
+from dataclasses import dataclass, field
+from tqdm import tqdm
 
 from numpy.random import RandomState
 from scipy.spatial.distance import squareform, pdist, cdist
@@ -301,47 +303,75 @@ def matmul_mem_efficient(a, b, device='cuda', split_dim=1, gpu_mem_budget=.1):
     return c
 
 
+@dataclass
+class DppMapState:
+    inds: list[int] = field(default_factory=list)
+    cis: torch.Tensor = field(default=None)
+    di2s: torch.Tensor = field(default=None)
+    marginal_gains: list = field(default_factory=list) # extra, keep track of objective
+        
 
-def torch_dppmap_memefficient(Ki_fn, Kd_fn, N, M, epsilon=1e-10, verbose=True):
+def torch_dppmap_memefficient(Ki_fn, Kd_fn, N, M, 
+                              epsilon=1e-10, 
+                              verbose=True, 
+                              save_dir=None,
+                              save_freq=None):
     """dpp map inference 
             - https://arxiv.org/pdf/1709.05135.pdf
     """
-    from tqdm import tqdm
-    # (M, N)
-    cis = torch.zeros((M, N), dtype=torch.float32)
-    # marginal gain of logdet by including j-th item at each iteration
-    marginal_gains = []
-    # (N,)
-    # di2s = torch.diag(K)
-    di2s = Kd_fn()
-    # grows to at most length M
-    inds = []
-    j = torch.argmax(di2s).item()
-    inds.append(j)
-    marginal_gains.append(di2s[j].item())
-    for _ in tqdm(range(M-1)):
-        k = len(inds) - 1
+    if save_dir is not None:
+        state_save_path = os.path.join(save_dir, 'DppMapState.pkl')
+    else:
+        state_save_path = ''
+
+    if not os.path.isfile(state_save_path):
+        state = DppMapState()
+        state.cis = torch.zeros((M, N), dtype=torch.float32)
+        state.di2s = Kd_fn()
+        j = torch.argmax(state.di2s).item()
+        state.inds.append(j)
+        state.marginal_gains.append(state.di2s[j].item())
+        start_iteration = 0
+    else:
+        with open(state_save_path, 'rb') as f:
+            state = pickle.load(f)
+        j = state.inds[-1]
+        start_iteration = len(state.inds)-1
+        print(f'Continuing from start_iteration={start_iteration}')
+
+    for _ in tqdm(range(start_iteration, M-1), initial=start_iteration):
+        k = len(state.inds) - 1
         # (k,)
-        ci_optimal = cis[:k, j]
-        di_optimal = torch.sqrt(di2s[j])
+        ci_optimal = state.cis[:k, j]
+        di_optimal = torch.sqrt(state.di2s[j])
         # Kj = K[j, :]
         Kj = Ki_fn(j)
         # (N,) - (k,)@(k,N) / (,) -> (N,)
-        eis = (Kj - ci_optimal@cis[:k, :]) / di_optimal
+        eis = (Kj - ci_optimal@state.cis[:k, :]) / di_optimal
         # update to k are updated.
-        cis[k, :] = eis
-        di2s -= torch.square(eis)
-        di2s[j] = -float('inf')
-        j = torch.argmax(di2s).item()
+        state.cis[k, :] = eis
+        state.di2s -= torch.square(eis)
+        state.di2s[j] = -float('inf')
+        j = torch.argmax(state.di2s).item()
 
-        if di2s[j] < epsilon:
+        if state.di2s[j] < epsilon:
             if verbose:
-                print(f'Stop on dᵢ^2 = {di2s[j]}. len(inds)={len(inds)} / {N}')
+                print(f'Stop on dᵢ^2 = {state.di2s[j]}. len(inds)={len(state.inds)} / {N}')
             break
-        inds.append(j)
-        marginal_gains.append(di2s[j].item())
+        state.inds.append(j)
+        state.marginal_gains.append(state.di2s[j].item())
 
-    return inds, marginal_gains
+        if save_dir is not None and save_freq is not None and (k+1) % save_freq == 0:
+            print(f'Save DppMapState at iteration {k} to {state_save_path}')
+            print(len(state.inds))
+            with open(state_save_path, 'wb') as f:
+                pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+                
+    if save_dir is not None:
+        if os.path.isfile(state_save_path):
+            os.remove(state_save_path)
+            
+    return state.inds, state.marginal_gains
 
 
 def Ki_fn_full(i, kernel_fn, X, Q):
@@ -358,12 +388,12 @@ def Kd_fn_full(kernel_fn, X, Q):
     return Kd
 
 
-def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None):
+def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None, save_dir=None):
     N = len(X)
     if dppmap_type == 'dppmap':
         Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
         Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
-        output = torch_dppmap_memefficient(Ki_fn, Kd_fn, N, max_length, verbose=True)
+        output = torch_dppmap_memefficient(Ki_fn, Kd_fn, N, max_length, verbose=True, save_dir=save_dir, save_freq=int(max_length//10))
     elif dppmap_type == 'dppmapbd': # block diagonal
         clusters = sorted(list(torch.unique(Y).cpu().numpy()))
         inds_list = []
@@ -516,16 +546,16 @@ def compute_dppmap(
         'theta': theta,
         'max_length': max_length
     }
+    save_dir = os.path.join(scripts_dir, 'dpp', dataset, run_name)
+    os.makedirs(save_dir, exist_ok=True)
+
     t0 = time.time()
-    inds, marginal_gains = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=Y)
+    inds, marginal_gains = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=Y, save_dir=save_dir)
     info['M'] = len(inds)
     info["time_elapsed"] = time.time()-t0
 
     data = {}
     data['marginal_gains'] = marginal_gains
-
-    save_dir = os.path.join('dpp', dataset, run_name)
-    os.makedirs(save_dir, exist_ok=True)
 
     with open(os.path.join(save_dir, 'info.json'), 'w') as f:
         json.dump(info, f, ensure_ascii=False, indent=4)
