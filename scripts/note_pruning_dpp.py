@@ -407,6 +407,15 @@ def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None):
     return output
 
 
+def normalize_to_unit_interval(Q, quantile_to_0=0.01, quantile_to_1=0.99):
+    q_lower, q_mid, q_upper = np.quantile(Q, quantile_to_0), \
+                              np.quantile(Q, .5), \
+                              np.quantile(Q, quantile_to_1)
+    Q = (Q-q_lower) / (q_upper-q_lower)
+    print(f'linearly transform scores s.t. prev value='
+          f'[{q_lower:.2f}, {q_mid:.2f}, {q_upper:.2f}] -> [0, {np.mean(Q):.2f}, 1]\n')
+    return Q
+
 
 def compute_dppmap(
     dppmap_type,
@@ -458,15 +467,18 @@ def compute_dppmap(
 
     if quality_score_type is None:
         Q = torch.ones([1], device=device).expand(len(X))
-    elif quality_score_type == 'ifd':
+    elif quality_score_type.startswith('ifd'):
         Q = get_ifd_and_pmi(dataset, get_full_model_name(quality_score_embed_model))['ifd']
+        if 'neg' in quality_score_type:
+            Q = -Q
+        Q = normalize_to_unit_interval(Q)
         Q = torch.from_numpy(Q).to(device)
     elif quality_score_type.startswith('log_pmi'): # higher is better!
         Q = get_ifd_and_pmi(dataset, get_full_model_name(quality_score_embed_model))['log_pmi']
-        q_lower, q_mid, q_upper = np.quantile(Q, .01), np.quantile(Q, .5),  np.quantile(Q, .99)
-        Q = (Q-q_lower) / (q_upper-q_lower)
-        print(f'linearly transform Q=log_pmi s.t. prev value=[{q_lower:.2f}, {q_mid:.2f}, {q_upper:.2f}] -> [0, {np.mean(Q):.2f}, 1]\n')
-        Q = torch.from_numpy(Q).to(device) 
+        if 'neg' in quality_score_type:
+            Q = -Q
+        Q = normalize_to_unit_interval(Q)
+        Q = torch.from_numpy(Q).to(device)
     else:
         dq = get_lm_output(
             dataset, 
