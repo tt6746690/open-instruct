@@ -393,7 +393,8 @@ def convert_starcoder_data(data_dir, output_dir):
         # 'commentinstrv2.json',
         'commentinstrv3.json',
     ]
-    filenames += [clean_starcoder_data(data_dir, filename) for filename in filenames]
+    # only keep cleaned data
+    filenames = [clean_starcoder_data(data_dir, filename) for filename in filenames]
     filenames = [x for x in filenames if x is not None]
     print('cleaned filenames:', filenames)
 
