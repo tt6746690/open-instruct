@@ -264,10 +264,16 @@ def dppmapbd(X, Y, kernel_type, epsilon=1E-10):
     return I.tolist()
 
 
-def torch_linear_kernel(X, Y=None):
+def torch_linear_kernel(X, Y, gamma=1.0):
+    """ linear kernel k(x,y)=γ·(x^Ty+1)/2. """
     S = X@Y.T
-    K = (S+1)/2 # ensures K \in [0,1]
+    # K = gamma*(S+1)/2 # ensures K \in [0,1]
+    K = gamma*(S-1)/2 + 1
     return K
+
+# def torch_linear_kernel_v2(X, Y, gamma=1.0):
+#     S = X@Y.T
+#     K = 
 
 
 def torch_vmf_kernel(X, Y, gamma=1.0):
@@ -303,6 +309,30 @@ def matmul_mem_efficient(a, b, device='cuda', split_dim=1, gpu_mem_budget=.1):
     return c
 
 
+def plt_torch_dppmap_run(state):
+    marginal_gains = state.marginal_gains
+    di2sL = state.di2sL # need to add this to the run when plotting.
+    
+    fig, ax = plt.subplots(1,1,figsize=(6,6))
+    ax.plot(marginal_gains, label='marginal gains')
+
+    for q in [.5]:
+        xs = np.linspace(0,len(di2sL)-1,20).round().astype(np.int32)
+        di2s_q = [np.quantile(di2sL[i][np.isfinite(di2sL[i])], q) for i in xs]
+        ax.plot(xs, di2s_q, linewidth=2, label=f'di2s quantile={q}')
+        
+    inds = [2,]
+    for ind in inds:
+        ax.plot(di2sL[:,ind], '--', label=f'di2s(ind={ind})')
+
+    ax.legend()
+    # ax.set_xlim((0, 600))
+    # ax.set_title(dataset+'_'+sort_by)
+    ax.set_xlabel('Steps')
+    ax.set_ylabel('di2 values')
+    ax.set_yscale('log')
+
+
 @dataclass
 class DppMapState:
     inds: list[int] = field(default_factory=list)
@@ -311,9 +341,12 @@ class DppMapState:
     marginal_gains: list = field(default_factory=list) # extra, keep track of objective
         
 
-def torch_dppmap_memefficient(Ki_fn, Kd_fn, N, M, 
-                              epsilon=1e-10, 
-                              verbose=True, 
+def torch_dppmap_memefficient(Ki_fn,
+                              Kd_fn,
+                              N,
+                              M,
+                              epsilon=1e-10,
+                              verbose=True,
                               save_dir=None,
                               save_freq=None):
     """dpp map inference 
@@ -339,7 +372,8 @@ def torch_dppmap_memefficient(Ki_fn, Kd_fn, N, M,
         start_iteration = len(state.inds)-1
         print(f'Continuing from start_iteration={start_iteration}')
 
-    for _ in tqdm(range(start_iteration, M-1), initial=start_iteration):
+    pbar = tqdm(range(start_iteration, M-1), initial=start_iteration)
+    for _ in pbar:
         k = len(state.inds) - 1
         # (k,)
         ci_optimal = state.cis[:k, j]
@@ -363,9 +397,10 @@ def torch_dppmap_memefficient(Ki_fn, Kd_fn, N, M,
 
         if save_dir is not None and save_freq is not None and (k+1) % save_freq == 0:
             print(f'Save DppMapState at iteration {k} to {state_save_path}')
-            print(len(state.inds))
             with open(state_save_path, 'wb') as f:
                 pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+        pbar.set_postfix({'di^2: ': state.marginal_gains[-1]})
+
                 
     if save_dir is not None:
         if os.path.isfile(state_save_path):
@@ -471,7 +506,7 @@ def compute_dppmap(
     elif kernel_type == 'rbf':
         kernel_fn = partial(torch_rbf_kernel, **kernel_kwargs)
     elif kernel_type == 'lin':
-        kernel_fn = torch_linear_kernel
+        kernel_fn = partial(torch_linear_kernel, **kernel_kwargs)
     else:
         raise ValueError(f'kernel_type={kernel_type} not supported.')
         
