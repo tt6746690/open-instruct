@@ -267,13 +267,8 @@ def dppmapbd(X, Y, kernel_type, epsilon=1E-10):
 def torch_linear_kernel(X, Y, gamma=1.0):
     """ linear kernel k(x,y)=γ·(x^Ty+1)/2. """
     S = X@Y.T
-    # K = gamma*(S+1)/2 # ensures K \in [0,1]
-    K = gamma*(S-1)/2 + 1
+    K = gamma*(S+1)/2 # ensures K \in [0,1]
     return K
-
-# def torch_linear_kernel_v2(X, Y, gamma=1.0):
-#     S = X@Y.T
-#     K = 
 
 
 def torch_vmf_kernel(X, Y, gamma=1.0):
