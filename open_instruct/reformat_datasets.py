@@ -337,7 +337,7 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False):
 def clean_starcoder_data(data_dir, filename):
     """Some data cleaning."""
 
-    if filename not in ['commentinstr.json']:
+    if filename in []:
         return None
 
     from datasets import load_dataset
@@ -388,11 +388,10 @@ def clean_starcoder_data(data_dir, filename):
 
 def convert_starcoder_data(data_dir, output_dir):
     filenames = [
-        # 'random_role.json',
-        # 'random_simple.json',
-        # 'role.json',
-        # 'simple.json',
-        'commentinstr.json',
+        # 'commentinstr.json',
+        # 'commentinstrv2_flppl.json',
+        # 'commentinstrv2.json',
+        'commentinstrv3.json',
     ]
     filenames += [clean_starcoder_data(data_dir, filename) for filename in filenames]
     filenames = [x for x in filenames if x is not None]
@@ -408,13 +407,13 @@ def convert_starcoder_data(data_dir, output_dir):
         output_path = os.path.join(output_dir, 'starcoder_'+filename.split('.')[0]+'.jsonl')
         with open(output_path, "w") as fout:
             for idx, example in enumerate(examples):
-                if filename == 'commentinstr.json':
+                if filename.startswith('commentinstr') and 'cleaned' not in filename:
                     instruction, input, output = example['docstring'], "", example['code']
                 else:
                     instruction, input, output = example['instruction'], example['input'], example['output']
                 encoded_example = encode_instruction_example(
                     instruction=instruction, 
-                    input=input, 
+                    input=input,
                     output=output,
                     random_template=True,
                     eos_token=None
