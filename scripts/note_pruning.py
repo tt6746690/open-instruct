@@ -308,9 +308,10 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         kvs = parse_kv_from_string(sort_by)
         md = kvs['md']
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
-        (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
-        (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
-        (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')):
+            (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
+            (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
+            (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')) or \
+            (md == 'codellama7b' and not model_name.lower().startswith('codellama-7b')):
             raise ValueError(f'md={md} does not match with model_name={model_name}')
         if md in ['mpnet', 'bge']:
             normalize_embeddings = True
@@ -363,7 +364,8 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
             (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
             (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
-            (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')):
+            (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')) or \
+            (md == 'codellama7b' and not model_name.lower().startswith('codellama-7b')):
             raise ValueError(f'md={md} does not match with model_name={model_name}')
         if kvs['k'] == 'vmf':
             kernel_kwargs = {'gamma': kvs['gamma']}
