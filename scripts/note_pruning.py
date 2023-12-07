@@ -445,9 +445,11 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             S = S.squeeze()
             save_prune_results(save_dir, None, S, {}, f'{sort_by}_{k}', model_name, dataset)
     elif sort_by.startswith('numtoks'):
-        if 'llama' in model_name.lower():
+        if model_name.lower().startswith('llama'):
             tokenizer = AutoTokenizer.from_pretrained('results/baselines/huggyllama/llama-7b', use_fast=False)
-        elif 'mistral' in model_name.lower():
+        elif model_name.lower().startswith('codellama'):
+            tokenizer = AutoTokenizer.from_pretrained('results/baselines/codellama/CodeLlama-7b-hf')
+        elif model_name.lower().startswith('mistral'):
             tokenizer = AutoTokenizer.from_pretrained('results/baselines/mistralai/Mistral-7B-v0.1', use_fast=False)
         else:
             raise ValueError('Need to supply appropriate tokenizer to count token lengths,')
