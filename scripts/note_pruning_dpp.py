@@ -2,14 +2,16 @@ import re
 import os
 import time
 import json
+import glob
 import pickle
-import numpy as np
 from functools import partial
 from dataclasses import dataclass, field
 from tqdm import tqdm
 
 from numpy.random import RandomState
+import numpy as np
 from scipy.spatial.distance import squareform, pdist, cdist
+import pandas as pd
 from dppy.finite_dpps import FiniteDPP
 
 import pyarrow # add before importing torch
@@ -594,6 +596,7 @@ def compute_dppmap(
         pickle.dump(data, f)
 
     plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_length)
+    plt_subset_size_vs_kernel_params(dataset) # update the subset size vs. kernel hyperparameter trend plot.
 
 
     ## convert `inds` to scores `S`
@@ -708,3 +711,90 @@ def plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_lengt
     plt.close()
 
 
+
+def plt_subset_size_vs_kernel_params(dataset):
+    """Plot how subse size varies with kernel hyperparameters.
+        ```
+        from note_pruning_dpp import plt_subset_size_vs_kernel_params
+        plt_subset_size_vs_kernel_params('wizardlm')
+        ```
+    """
+    filepaths = glob.glob(os.path.join(scripts_dir, 'dpp', dataset, 'dppmap_*'))
+    filenames = [os.path.basename(x) for x in filepaths]
+
+    df = pd.DataFrame({'filename': filenames})
+    df = df[df['filename'].str.contains('gamma')]
+
+    def get_sort_by_fn(r):
+        match = re.search(r'gamma=([0-9.]+)', r['filename'])
+        if match:
+            return r['filename'].replace(match.group(1), '([0-9.]+)')
+        else:
+            return None
+    df['sort_by'] = df.apply(get_sort_by_fn, axis=1)
+    def get_info_fn(r):
+        info_path = os.path.join(scripts_dir, 'dpp', dataset, r['filename'], 'info.json')
+        if not os.path.isfile(info_path):
+            cols = {'gamma': None, 'M': None, 'max_length': None, 'time_elapsed': None}
+        with open(info_path, 'r') as f:
+            d = json.load(f)
+            cols = {'gamma': d['kernel_kwargs']['gamma'],
+                    'max_length': d['max_length'],
+                    'M': d['M'],
+                    'time_elapsed': d['time_elapsed'],
+                   }
+        return pd.Series(cols)
+    df = pd.concat([df, df.apply(get_info_fn, axis=1)], axis=1)
+    df = df[~df['gamma'].isna()]
+    df = df[df.max_length > df.M]
+    df = df.sort_values(['sort_by', 'gamma'])
+    df = df.reset_index(drop=True)
+
+    info = df.groupby('sort_by').apply(lambda g: g[['gamma', 'M', 'time_elapsed']].to_dict(orient='list')).to_dict()
+
+    nrows = len(info) + 2
+
+    fig, axs = plt.subplots(nrows, 1, figsize=(8,4*nrows))
+
+    ax = axs[0]
+    for i, (sort_by, d) in enumerate(info.items()):
+        ax.plot(d['gamma'], d['M'], 'o', label=sort_by)
+    ax.set_ylabel('subset size')
+    ax.set_xlabel('gamma')
+    ax.legend(fontsize=8)
+
+    ax = axs[1]
+    for i, (sort_by, d) in enumerate(info.items()):
+        ax.plot(d['gamma'], np.array(d['time_elapsed'])/60./60., label=sort_by)
+    ax.set_ylabel('Time (hrs)')
+    ax.set_xlabel('gamma')
+    ax.legend(fontsize=8)
+
+
+    for i, (sort_by, d) in enumerate(info.items()):
+        ax = axs[i+2]
+        xs, ys = d['gamma'], d['M']
+        ax.plot(xs, ys, 'x', markersize=10, label=sort_by)
+        coeff = np.polyfit(xs, ys, 1)
+        poly1d_fn = np.poly1d(coeff)
+        xs_extrap = np.linspace(0, 1.05*np.max(xs), 100)
+        ax.plot(xs_extrap, poly1d_fn(xs_extrap), '--k', label=f'Fitted linear fn (m={coeff[0]:.1f},b={coeff[1]:.1f})')
+        ys_target = np.array([1_000, 5_000, 10_000, 50_000])
+        xs_target = (ys_target - coeff[1]) / coeff[0]
+        for x, y in zip(xs_target, ys_target):
+            ax.scatter(x, y, color='k', label=f'({x:.5f}, {y})')
+        for x, y in zip(xs_target, ys_target):
+            ymin, ymax = ax.get_ylim(); yrel = (y-ymin)/(ymax-ymin)
+            xmin, xmax = ax.get_xlim(); xrel = (x-xmin)/(xmax-xmin)
+            ax.axvline(x=x, ymax=yrel, color='b', linestyle='--')
+            ax.axhline(y=y, xmax=xrel, color='b', linestyle='--')
+        ax.set_ylabel('subset size')
+        ax.set_xlabel('gamma')
+        ax.legend()
+
+
+    fig.tight_layout()
+    save_path = os.path.join(scripts_dir, 'dpp', dataset, f'fig_dppmap_subset_size_vs_kernel_params.png')
+    fig.savefig(save_path, bbox_inches='tight', dpi=100)
+    plt.close()
+    
