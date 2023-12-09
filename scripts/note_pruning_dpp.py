@@ -275,16 +275,24 @@ def torch_linear_kernel(X, Y, gamma=1.0):
 
 def torch_vmf_kernel(X, Y, gamma=1.0):
     """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty)"""
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
     S = X@Y.T
     S = (S-1)/2 # ensures S \in [-1,0]
     K = torch.exp(gamma*S) # ensures K \in [0,1]
     return K
 
 
-def torch_rbf_kernel(X, Y=None, sigma=1.0):
+def torch_rbf_kernel(X, Y=None, gamma=1.0):
     """ Computes the standard Gaussian kernel k(x,y)=exp(- ||x-y||**2 / (2·σ2)). """
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
     sq_dists = torch.cdist(X, Y, p=2)**2
-    K = torch.exp(-sq_dists / (2 * sigma**2))
+    K = torch.exp(-gamma*sq_dists)
     return K
 
 
@@ -415,6 +423,7 @@ def Ki_fn_full(i, kernel_fn, X, Q):
 
 def Kd_fn_full(kernel_fn, X, Q):
     Kd = torch.stack([kernel_fn(X[i], X[i]) for i in range(len(X))])
+    Kd = Kd.reshape(-1)
     Kd = Kd * Q**2
     Kd = Kd.reshape(-1).to('cpu')
     return Kd
@@ -513,6 +522,11 @@ def compute_dppmap(
         quality_score_embed_model not in ['mpnet', 'bge', 'llama7b', 'mistral7b', 'llama7b+lima']:
         # if theta!=0, then we're using quality score and so need to specify model
         raise ValueError(f'quality_score_embed_model={quality_score_embed_model} not supported.')
+
+    ## parse `text_embedding_rp256` to `text_embedding` and `rand_proj` dimensions
+    match = re.search(r'rp(\d+)', kernel_embed_type)
+    rand_proj = int(match.group(1)) if match else None
+    kernel_embed_type = re.sub(r'_rp(\d+)', '', kernel_embed_type)
     if kernel_embed_type not in ['text_embedding', 'grad_rp_loraB']:
         raise ValueError(f'kernel_embed_type={kernel_embed_type} not supported.')
         
@@ -525,6 +539,13 @@ def compute_dppmap(
     X = dk[kernel_embed_type]
     if any(x in kernel_embed_model for x in ['mpnet', 'bge']):
         X = X / np.maximum(np.linalg.norm(X, axis=-1, keepdims=True), 1e-8) # possibly divide by zero.
+    if rand_proj is not None:
+        from sklearn.random_projection import GaussianRandomProjection
+        jl_proj = GaussianRandomProjection(n_components=rand_proj, random_state=0)
+        print(f'Start random projection from {X.shape[1]} -> {rand_proj} ...')
+        X = jl_proj.fit_transform(X)
+        print('Done random projection.')
+
     X = torch.from_numpy(X).to(device)
 
     if quality_score_type is None:
@@ -576,7 +597,8 @@ def compute_dppmap(
         'quality_score_type': quality_score_type,
         'quality_score_embed_model': quality_score_embed_model,
         'theta': theta,
-        'max_length': max_length
+        'max_length': max_length,
+        'rand_proj': rand_proj,
     }
     save_dir = os.path.join(scripts_dir, 'dpp', dataset, run_name)
     os.makedirs(save_dir, exist_ok=True)
@@ -735,14 +757,21 @@ def plt_subset_size_vs_kernel_params(dataset):
     def get_info_fn(r):
         info_path = os.path.join(scripts_dir, 'dpp', dataset, r['filename'], 'info.json')
         if not os.path.isfile(info_path):
-            cols = {'gamma': None, 'M': None, 'max_length': None, 'time_elapsed': None}
-        with open(info_path, 'r') as f:
-            d = json.load(f)
-            cols = {'gamma': d['kernel_kwargs']['gamma'],
+            cols = {
+                'gamma': None, 
+                'max_length': None, 
+                'M': None, 
+                'time_elapsed': None,
+            }
+        else:
+            with open(info_path, 'r') as f:
+                d = json.load(f)
+                cols = {
+                    'gamma': d['kernel_kwargs']['gamma'],
                     'max_length': d['max_length'],
                     'M': d['M'],
                     'time_elapsed': d['time_elapsed'],
-                   }
+                }
         return pd.Series(cols)
     df = pd.concat([df, df.apply(get_info_fn, axis=1)], axis=1)
     df = df[~df['gamma'].isna()]
