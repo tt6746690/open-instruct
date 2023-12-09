@@ -336,7 +336,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         if kvs['k'] == 'vmf':
             kernel_kwargs = {'gamma': kvs['gamma']}
         elif kvs['k'] == 'rbf':
-            kernel_kwargs = {'sigma': kvs['sigma']}
+            kernel_kwargs = {'gamma': kvs['gamma']}
         elif kvs['k'] == 'lin':
             kernel_kwargs = {'gamma': kvs.get('gamma', 1.)}
         else:
@@ -370,7 +370,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         if kvs['k'] == 'vmf':
             kernel_kwargs = {'gamma': kvs['gamma']}
         elif kvs['k'] == 'rbf':
-            kernel_kwargs = {'sigma': kvs['sigma']}
+            kernel_kwargs = {'gamma': kvs['gamma']}
         elif kvs['k'] == 'lin':
             kernel_kwargs = {'gamma': kvs.get('gamma', 1.)}
         else:
