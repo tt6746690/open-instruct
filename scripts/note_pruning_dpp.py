@@ -538,7 +538,7 @@ def compute_dppmap(
         encode_fn_type='input' if kernel_embed_model in ['mpnet', 'bge'] else 'sft', 
         return_text_embedding=True)
     X = dk[kernel_embed_type]
-    if any(x in kernel_embed_model for x in ['mpnet', 'bge']):
+    if any(x in kernel_embed_model for x in ['mpnet', 'bge']) or kernel_type in ['vmf', 'lin']:
         X = X / np.maximum(np.linalg.norm(X, axis=-1, keepdims=True), 1e-8) # possibly divide by zero.
     if rand_proj is not None:
         from sklearn.random_projection import GaussianRandomProjection
