@@ -55,7 +55,7 @@ def get_ifd_and_pmi(dataset, model_name):
         output = '\n'.join(output)
         numtoks_output = len(tokenizer(output, max_length=2048, truncation=True)['input_ids'])
         return {'numtoks_output': numtoks_output}
-    ds = ds.map(count_numtoks, num_proc=8)
+    ds = ds.map(count_numtoks, num_proc=32)
     numtoks_output = ds['numtoks_output']
     numtoks_output = np.maximum(numtoks_output, 1) # in case numtoks=0
 
@@ -431,6 +431,7 @@ def Kd_fn_full(kernel_fn, X, Q):
 
 def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None, save_dir=None):
     N = len(X)
+    max_length = min(N, max_length)
     if dppmap_type == 'dppmap':
         Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
         Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
@@ -610,6 +611,7 @@ def compute_dppmap(
 
     data = {}
     data['marginal_gains'] = marginal_gains
+    data['inds'] = inds
 
     with open(os.path.join(save_dir, 'info.json'), 'w') as f:
         json.dump(info, f, ensure_ascii=False, indent=4)
@@ -741,42 +743,9 @@ def plt_subset_size_vs_kernel_params(dataset):
         plt_subset_size_vs_kernel_params('wizardlm')
         ```
     """
-    filepaths = glob.glob(os.path.join(scripts_dir, 'dpp', dataset, 'dppmap_*'))
-    filenames = [os.path.basename(x) for x in filepaths]
 
-    df = pd.DataFrame({'filename': filenames})
-    df = df[df['filename'].str.contains('gamma')]
-
-    def get_sort_by_fn(r):
-        match = re.search(r'gamma=([0-9.]+)', r['filename'])
-        if match:
-            return r['filename'].replace(match.group(1), '([0-9.]+)')
-        else:
-            return None
-    df['sort_by'] = df.apply(get_sort_by_fn, axis=1)
-    def get_info_fn(r):
-        info_path = os.path.join(scripts_dir, 'dpp', dataset, r['filename'], 'info.json')
-        if not os.path.isfile(info_path):
-            cols = {
-                'gamma': None, 
-                'max_length': None, 
-                'M': None, 
-                'time_elapsed': None,
-            }
-        else:
-            with open(info_path, 'r') as f:
-                d = json.load(f)
-                cols = {
-                    'gamma': d['kernel_kwargs']['gamma'],
-                    'max_length': d['max_length'],
-                    'M': d['M'],
-                    'time_elapsed': d['time_elapsed'],
-                }
-        return pd.Series(cols)
-    df = pd.concat([df, df.apply(get_info_fn, axis=1)], axis=1)
-    df = df[~df['gamma'].isna()]
+    df = get_dppmap_run_info('dppmap_*', dataset)
     df = df[df.max_length > df.M]
-    df = df.sort_values(['sort_by', 'gamma'])
     df = df.reset_index(drop=True)
 
     info = df.groupby('sort_by').apply(lambda g: g[['gamma', 'M', 'time_elapsed']].to_dict(orient='list')).to_dict()
@@ -811,7 +780,7 @@ def plt_subset_size_vs_kernel_params(dataset):
         ys_target = np.array([1_000, 5_000, 10_000, 50_000])
         xs_target = (ys_target - coeff[1]) / coeff[0]
         for x, y in zip(xs_target, ys_target):
-            ax.scatter(x, y, color='k', label=f'({x:.5f}, {y})')
+            ax.scatter(x, y, color='k', label=f'({x:.8f}, {y})')
         for x, y in zip(xs_target, ys_target):
             ymin, ymax = ax.get_ylim(); yrel = (y-ymin)/(ymax-ymin)
             xmin, xmax = ax.get_xlim(); xrel = (x-xmin)/(xmax-xmin)
@@ -827,3 +796,61 @@ def plt_subset_size_vs_kernel_params(dataset):
     fig.savefig(save_path, bbox_inches='tight', dpi=100)
     plt.close()
     
+
+
+def get_dppmap_run_info(filename, dataset):
+    """get previous run info that is related to `filename` or `sort_by`. 
+            only for `sort_by` with tunable `gamma`. 
+
+        info: gamma, max_length, M, time_elapsed
+    """
+    filepaths = glob.glob(os.path.join(scripts_dir, 'dpp', dataset, filename))
+    filenames = [os.path.basename(x) for x in filepaths]
+    if not filenames:
+        return pd.DataFrame(columns=[
+            'filename',
+            'sort_by',
+            'gamma',
+            'max_length',
+            'M',
+            'time_elapsed',
+        ])
+
+    df = pd.DataFrame({'filename': filenames})
+    df = df[df['filename'].str.contains('gamma')]
+
+    def get_sort_by_fn(r):
+        match = re.search(r'gamma=([\d.e+-]+)', r['filename'])
+        if match:
+            return r['filename'].replace(match.group(1), '([\d.e+-]+)')
+        else:
+            return None
+    df['sort_by'] = df.apply(get_sort_by_fn, axis=1)
+
+    def get_info_fn(r):
+        info_path = os.path.join(scripts_dir, 'dpp', dataset, r['filename'], 'info.json')
+        if not os.path.isfile(info_path):
+            cols = {
+                'gamma': None, 
+                'max_length': None, 
+                'M': None, 
+                'time_elapsed': None,
+            }
+        else:
+            with open(info_path, 'r') as f:
+                d = json.load(f)
+                cols = {
+                    'gamma': d['kernel_kwargs']['gamma'],
+                    'max_length': int(d['max_length']),
+                    'M': int(d['M']),
+                    'time_elapsed': d['time_elapsed'],
+                }
+        return pd.Series(cols)
+    df = pd.concat([df, df.apply(get_info_fn, axis=1)], axis=1)
+    df = df[~df['gamma'].isna()]
+    df['max_length'] = df['max_length'].astype(np.int32)
+    df['M'] = df['M'].astype(np.int32)
+    df = df.sort_values(['sort_by', 'gamma'])
+    df = df.reset_index(drop=True)
+
+    return df

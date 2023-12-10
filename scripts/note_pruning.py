@@ -192,6 +192,100 @@ def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos', torch_compile=False):
     return inds
 
 
+
+def parse_sort_by_and_compute_dppmap(sort_by, dataset):
+    kvs = parse_kv_from_string(sort_by)
+    if kvs['k'] == 'vmf':
+        kernel_kwargs = {'gamma': kvs['gamma']}
+    elif kvs['k'] == 'rbf':
+        kernel_kwargs = {'gamma': kvs['gamma']}
+    elif kvs['k'] == 'lin':
+        kernel_kwargs = {'gamma': kvs.get('gamma', 1.)}
+    else:
+        kernel_kwargs = {}
+    kwargs = {
+        'dppmap_type': 'dppmap',
+        'dataset': dataset,
+        'kernel_type': kvs['k'],
+        'kernel_embed_model': kvs['kmd'],
+        'kernel_embed_type': re.sub(r'[+]', '_', kvs['kemb']) if 'kemb' in kvs else 'text_embedding',
+        'kernel_kwargs': kernel_kwargs,
+        'quality_score_type': re.sub(r'[+]', '_', kvs['q']) if 'q' in kvs else None,
+        'quality_score_embed_model': kvs.get('qmd', None),
+        'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
+        'device': 'cuda',
+        'max_length': 55_000, # balance finish job within 6 hrs with wanting to prune a lot. meaning resulting scores will only be valid up to 20k for large datasets.
+        'run_name': sort_by,
+    }
+    print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
+    return note_pruning_dpp.compute_dppmap(**kwargs)
+
+
+
+
+def parse_sort_by_and_compute_dppmap_autotune_gamma(
+        sort_by,
+        dataset,
+        rel_tol=0.01,
+        max_iterations=5,
+    ):
+    """run dppmap, but auto-tunes `gamma` to reach target_size. """
+    
+    from note_pruning_dpp import get_dppmap_run_info
+
+    match = re.search(r'gamma=auto([\d.e+-]+)', sort_by)
+    target_size = int(match.group(1))
+
+    df = get_dppmap_run_info(
+        re.sub('gamma=auto([\d.e+-]+)', 'gamma=*', sort_by), 
+        dataset)
+    d = df[['gamma', 'M']].to_dict(orient='list')
+
+    if len(df) >= 1:
+        M_closest, gamma = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
+    else:
+        M_closest, gamma = None, 1e-7
+    print(f'[autotune gamma] Set initial gamma={gamma} / M={M_closest} to reach target_size={target_size}')
+
+
+    results = None, None
+    for it in range(max_iterations):
+
+        df = get_dppmap_run_info(
+            re.sub('gamma=auto([\d.e+-]+)', 'gamma=*', sort_by), 
+            dataset)
+        d = df[['gamma', 'M']].to_dict(orient='list')
+        M_closest, gamma_closest = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
+        if np.abs(((M_closest-target_size)/target_size)) < rel_tol:
+            print(f'[autotune gamma] Terminate since gamma={gamma_closest} / M={M_closest} '
+                f'is within {rel_tol} of target_size={target_size}')
+            return results
+
+        if len(df) >= 2:
+            # Fit linear fn: M = m*γ + b
+            # give more weight to closeby gamma & M
+            m, b = np.polyfit(
+                d['gamma'],
+                d['M'],
+                deg=1, 
+                w=1/np.abs(target_size-np.array(d['M']))**2
+            )
+            gamma = (target_size-b) / m
+            gamma = np.round(gamma, 3 - int(np.floor(np.log10(abs(gamma)))) - 1) # round to 3 sig-dig
+        else:
+            gamma = 2*gamma if target_size > M_closest else .5*gamma
+
+        results = parse_sort_by_and_compute_dppmap(
+            sort_by=re.sub(r'gamma=auto([\d.e+-]+)', f'gamma={gamma}', sort_by), 
+            dataset=dataset)
+        print(f"[autotune gamma] Iteration {it} tried gamma={gamma}, got M={results[1]['info']['M']}")
+
+    print(f'[autotune gamma] Reached max_iterations without finding a good gamma (gamma={gamma})')
+
+    return results
+
+
+
 def save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, dataset):
     
     if any(sort_by.startswith(x) for x in ['dpp_']):
@@ -332,31 +426,12 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         log_prob = d['log_prob']
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
     elif sort_by.startswith('dppmap_'):
-        kvs = parse_kv_from_string(sort_by)
-        if kvs['k'] == 'vmf':
-            kernel_kwargs = {'gamma': kvs['gamma']}
-        elif kvs['k'] == 'rbf':
-            kernel_kwargs = {'gamma': kvs['gamma']}
-        elif kvs['k'] == 'lin':
-            kernel_kwargs = {'gamma': kvs.get('gamma', 1.)}
+        if 'gamma=auto' in sort_by:
+            S, info = parse_sort_by_and_compute_dppmap_autotune_gamma(sort_by, dataset)
+            if S is None and info is None:
+                return
         else:
-            kernel_kwargs = {}
-        kwargs = {
-            'dppmap_type': 'dppmap',
-            'dataset': dataset,
-            'kernel_type': kvs['k'],
-            'kernel_embed_model': kvs['kmd'],
-            'kernel_embed_type': re.sub(r'[+]', '_', kvs['kemb']) if 'kemb' in kvs else 'text_embedding',
-            'kernel_kwargs': kernel_kwargs,
-            'quality_score_type': re.sub(r'[+]', '_', kvs['q']) if 'q' in kvs else None,
-            'quality_score_embed_model': kvs.get('qmd', None),
-            'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
-            'device': 'cuda',
-            'max_length': min(55_000, N), # balance finish job within 6 hrs with wanting to prune a lot. meaning resulting scores will only be valid up to 20k for large datasets.
-            'run_name': sort_by,
-        }
-        print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
-        S, output = note_pruning_dpp.compute_dppmap(**kwargs)
+            S, info = parse_sort_by_and_compute_dppmap(sort_by, dataset)
         pkl_extra['info'] = output
     elif sort_by.startswith('dppmapbd'):
         kvs = parse_kv_from_string(sort_by)
