@@ -227,7 +227,7 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
         sort_by,
         dataset,
         rel_tol=0.01,
-        max_iterations=5,
+        max_iterations=10,
     ):
     """run dppmap, but auto-tunes `gamma` to reach target_size. """
     
@@ -236,30 +236,34 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
     match = re.search(r'gamma=auto([\d.e+-]+)', sort_by)
     target_size = int(match.group(1))
 
-    df = get_dppmap_run_info(
-        re.sub('gamma=auto([\d.e+-]+)', 'gamma=*', sort_by), 
-        dataset)
-    d = df[['gamma', 'M']].to_dict(orient='list')
-
-    if len(df) >= 1:
-        M_closest, gamma = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
-    else:
-        M_closest, gamma = None, 1e-7
-    print(f'[autotune gamma] Set initial gamma={gamma} / M={M_closest} to reach target_size={target_size}')
-
 
     results = None, None
     for it in range(max_iterations):
-
+        # 
+        # - Since gamma and subset_size roughly linear. Fit a 
+        # linear function to predict subset_size from gamma from past runs.
+        # - Since large gamma -> large compute cost, try small gamma first!
+        # instead of using bisection where you are doing binary search over [low, high]
+        # 
+        
+        ## Initialize `gamma`
         df = get_dppmap_run_info(
             re.sub('gamma=auto([\d.e+-]+)', 'gamma=*', sort_by), 
             dataset)
         d = df[['gamma', 'M']].to_dict(orient='list')
-        M_closest, gamma_closest = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
-        if np.abs(((M_closest-target_size)/target_size)) < rel_tol:
-            print(f'[autotune gamma] Terminate since gamma={gamma_closest} / M={M_closest} '
-                f'is within {rel_tol} of target_size={target_size}')
-            return results
+
+        if it == 0:
+            if len(df) >= 1:
+                M_closest, gamma = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
+            else:
+                M_closest, gamma = None, 1e-8
+            print(f'[autotune gamma] Set initial gamma={gamma} / M={M_closest} to reach target_size={target_size}')
+        else:
+            M_closest, gamma = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
+            if np.abs(((M_closest-target_size)/target_size)) < rel_tol:
+                print(f'[autotune gamma] Terminate since gamma={gamma} / M={M_closest} '
+                    f'is within {rel_tol} of target_size={target_size}')
+                return results
 
         if len(df) >= 2:
             # Fit linear fn: M = m*γ + b
@@ -273,12 +277,15 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
             gamma = (target_size-b) / m
             gamma = np.round(gamma, 3 - int(np.floor(np.log10(abs(gamma)))) - 1) # round to 3 sig-dig
         else:
-            gamma = 2*gamma if target_size > M_closest else .5*gamma
+            if it == 0:
+                gamma = 2*gamma
+            else:
+                gamma = 2*gamma if target_size > M_closest else .5*gamma
 
         results = parse_sort_by_and_compute_dppmap(
             sort_by=re.sub(r'gamma=auto([\d.e+-]+)', f'gamma={gamma}', sort_by), 
             dataset=dataset)
-        print(f"[autotune gamma] Iteration {it} tried gamma={gamma}, got M={results[1]['info']['M']}")
+        print(f"[autotune gamma] Iteration {it} tried gamma={gamma}, got M={results[1]['M']}")
 
     print(f'[autotune gamma] Reached max_iterations without finding a good gamma (gamma={gamma})')
 
@@ -432,7 +439,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
                 return
         else:
             S, info = parse_sort_by_and_compute_dppmap(sort_by, dataset)
-        pkl_extra['info'] = output
+        pkl_extra['info'] = info
     elif sort_by.startswith('dppmapbd'):
         kvs = parse_kv_from_string(sort_by)
         md = kvs['kmd']
