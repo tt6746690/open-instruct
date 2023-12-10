@@ -259,11 +259,12 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
                 M_closest, gamma = None, 1e-8
             print(f'[autotune gamma] Set initial gamma={gamma} / M={M_closest} to reach target_size={target_size}')
 
-        M_closest, gamma = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
-        if np.abs(((M_closest-target_size)/target_size)) < rel_tol:
-            print(f'[autotune gamma] Terminate since gamma={gamma} / M={M_closest} '
-                f'is within {rel_tol} of target_size={target_size}')
-            return results
+        if len(df) > 0:
+            M_closest, gamma = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
+            if np.abs(((M_closest-target_size)/target_size)) < rel_tol:
+                print(f'[autotune gamma] Terminate since gamma={gamma} / M={M_closest} '
+                    f'is within {rel_tol} of target_size={target_size}')
+                return results
 
         if len(df) >= 2:
             # Fit linear fn: M = m*γ + b
