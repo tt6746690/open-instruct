@@ -290,6 +290,12 @@ def sample_indices_given_scores(scores, portion):
         """
     np.random.seed(0)
 
+    # take first `M` examples to sample scores
+    match = re.search(r'sorted(\d+)_', portion)
+    if match:
+        scores = scores[:int(match.group(1))]
+        portion = re.sub(r'sorted(\d+)_', 'sorted_', portion)
+
     match = re.search(r'num=([^_]+)', portion)
     num_printed = int(match.group(1))
 
@@ -416,14 +422,19 @@ def flatten_dict(d, parent_key='', sep='_'):
 def save_text_viz_for_curriculum(path):
     """Saves some text snippets for visualization for a curriculum. """
     from note_curriculum import get_curriculum_scores
-    num_examples = 400
-    portion_list = [
+    num_examples = 100
+    portion_list = [ 
         f'sorted_beg_num={num_examples}',
         f'sorted_end_num={num_examples}',
+        f'sorted_random_num={num_examples}',
         f'sorted_partition=1:10_num={num_examples}',
         f'sorted_partition=10:10_num={num_examples}',
-        f'sorted_partition=2:3_num={num_examples}',
-        f'sorted_random_num={num_examples}',
+        f'sorted1000_beg_num={num_examples}',
+        f'sorted1000_end_num={num_examples}',
+        f'sorted1000_random_num={num_examples}',
+        f'sorted10000_beg_num={num_examples}',
+        f'sorted10000_end_num={num_examples}',
+        f'sorted10000_random_num={num_examples}',
     ]
     output = get_curriculum_scores(path)
     scores = output['scores']
