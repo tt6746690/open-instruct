@@ -283,25 +283,22 @@ def write_ds_to_file_for_reading(dataset, output_path, num_examples=None):
 
 
 
-def sample_indices_given_scores(scores, portion):
+def sample_indices_given_scores(scores, portion, num_printed=100):
     """Given `scores`, sample indices from corresponding regions of indices
         indicated by `portion`.
         Used to generate a few examples for text visualization.
         """
     np.random.seed(0)
 
-    # take first `M` examples to sample scores
-    match = re.search(r'sorted(\d+)_', portion)
-    if match:
-        scores = scores[:int(match.group(1))]
-        portion = re.sub(r'sorted(\d+)_', 'sorted_', portion)
-
-    match = re.search(r'num=([^_]+)', portion)
-    num_printed = int(match.group(1))
-
     if portion.startswith('sorted'):
         inds_sorted = np.argsort(scores)
-        inds_to_inds = np.arange(len(scores))
+        inds_to_inds = np.arange(len(inds_sorted))
+
+        # take first `M` examples to sample scores
+        match = re.search(r'sorted(\d+)_', portion)
+        if match:
+            inds_to_inds = inds_to_inds[:int(match.group(1))]
+            portion = re.sub(r'sorted(\d+)_', 'sorted_', portion)
 
         if portion.startswith(('sorted_beg', 'sorted_end')):
             if portion.startswith('sorted_end'):
@@ -424,17 +421,17 @@ def save_text_viz_for_curriculum(path):
     from note_curriculum import get_curriculum_scores
     num_examples = 100
     portion_list = [ 
-        f'sorted_beg_num={num_examples}',
-        f'sorted_end_num={num_examples}',
-        f'sorted_random_num={num_examples}',
-        f'sorted_partition=1:10_num={num_examples}',
-        f'sorted_partition=10:10_num={num_examples}',
-        f'sorted1000_beg_num={num_examples}',
-        f'sorted1000_end_num={num_examples}',
-        f'sorted1000_random_num={num_examples}',
-        f'sorted10000_beg_num={num_examples}',
-        f'sorted10000_end_num={num_examples}',
-        f'sorted10000_random_num={num_examples}',
+        f'sorted_beg',
+        f'sorted_end',
+        f'sorted_random',
+        f'sorted_partition=1:10',
+        f'sorted_partition=10:10',
+        f'sorted1000_beg',
+        f'sorted1000_end',
+        f'sorted1000_random',
+        f'sorted10000_beg',
+        f'sorted10000_end',
+        f'sorted10000_random',
     ]
     output = get_curriculum_scores(path)
     scores = output['scores']
@@ -443,14 +440,14 @@ def save_text_viz_for_curriculum(path):
     ds = get_dataset(dataset)
     for portion in portion_list:
         # sample subsets for printing
-        inds = sample_indices_given_scores(scores, portion)
+        inds = sample_indices_given_scores(scores, portion, num_printed=100)
         def add_score_fn(example, idx):
             example.update({'score': scores[inds[idx]]})
             return example
         ds_subset = ds.select(inds).map(add_score_fn, with_indices=True, keep_in_memory=True)
         write_ds_to_file_for_reading(
             dataset=ds_subset, 
-            output_path=os.path.join('text_viz', os.path.dirname(path), f'{portion}.txt'),
+            output_path=os.path.join('text_viz', os.path.dirname(path), f"{portion}.txt"),
             num_examples=num_examples)
 
 
