@@ -334,7 +334,7 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False):
             }) + "\n")
 
 
-def clean_starcoder_data(data_dir, filename):
+def clean_starcoder_data(data_dir, filename, num_proc=16):
     """Some data cleaning."""
 
     if filename in []:
@@ -344,15 +344,24 @@ def clean_starcoder_data(data_dir, filename):
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained('/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/codellama/CodeLlama-7b-hf')
 
-    ds = load_dataset('json', data_files={'train': os.path.join(data_dir, filename)}, 
+    ## take into account rathing threshold.
+    match = re.search(r'rge(\d)', filename)
+    if match:
+        rating_threshold = int(match.group(1))
+        input_filename = re.sub(r'_rge(\d)', '', filename)
+    else:
+        rating_threshold = None
+        input_filename = filename
+
+    ds = load_dataset('json', data_files={'train': os.path.join(data_dir, input_filename)}, 
              split='train', cache_dir=data_dir)
 
     def docstring_startswith_args(example):
         return example['docstring'][:10].lower().startswith('args')
-    ds = ds.filter(lambda x: not docstring_startswith_args(x), num_proc=8)
+    ds = ds.filter(lambda x: not docstring_startswith_args(x), num_proc=num_proc)
     def code_endsin_pass(example):
         return example['code'][-10:].lower().endswith('pass')
-    ds = ds.filter(lambda x: not code_endsin_pass(x), num_proc=8)
+    ds = ds.filter(lambda x: not code_endsin_pass(x), num_proc=num_proc)
     def tokenize_fn(example):
         example.update({
             'instruction_'+k: v for k, v in 
@@ -367,7 +376,7 @@ def clean_starcoder_data(data_dir, filename):
             'numtoks_output': len(example['output_input_ids']),
         })
         return example
-    ds = ds.map(tokenize_fn, num_proc=8)
+    ds = ds.map(tokenize_fn, num_proc=num_proc)
     def text_within_reasonable_range(example):
         """Removes
             - empty or uninformative instructions 
@@ -377,21 +386,51 @@ def clean_starcoder_data(data_dir, filename):
         return example['numtoks_instruction'] >= 5 and \
             example['numtoks_instruction'] + example['numtoks_output'] <= 2024 and \
             example['numtoks_output'] >= 40
-    ds = ds.filter(text_within_reasonable_range, num_proc=8)
+    ds = ds.filter(text_within_reasonable_range, num_proc=num_proc)
+
+    ## parse score from `generated_output`
+    if 'generated_output' in ds.column_names:
+        def parse_score_fn(example):
+            match = re.search(r'(Rating|[Ss]core):?\s?\n?(\d)', example['generated_output'])
+            score = int(match.group(2)) if match else None
+            if score is not None:
+                score = 1 if score < 1 else score
+                score = 5 if score > 5 else score
+            if score not in [1, 2, 3, 4, 5]:
+                score = None
+            return {'llm_score': score}
+        ds = ds.map(parse_score_fn, num_proc=num_proc)
+        ds = ds.filter(lambda x: x['llm_score'] is not None)
+        if rating_threshold is not None:
+            ds = ds.filter(lambda x: x['llm_score'] >= rating_threshold)
+
     ds = ds.rename_columns({'docstring': 'instruction', 'code': 'output'})
-    ds = ds.map(lambda _: {'input': ""}, num_proc=8)
-    ds = ds.select_columns(['instruction', 'input', 'output'])
+    ds = ds.map(lambda _: {'input': ""}, num_proc=num_proc)
+    columns = ['instruction', 'input', 'output']
+    if 'llm_score' in ds.column_names:
+        columns.append('llm_score')
+    ds = ds.select_columns(columns)
     filename_cleaned = f"{filename.split('.json')[0]}_cleaned.jsonl"
     ds.to_json(os.path.join(data_dir, filename_cleaned))
     return filename_cleaned
 
 
 def convert_starcoder_data(data_dir, output_dir):
-    filenames = [
+    """
+        ```
+        data_dir = 'data/raw_train/starcoder'
+        output_dir = 'data/processed/starcoder'
+        ```
+
+        python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset starcoder
+    """
+    filenames = [ 
         # 'commentinstr.json',
         # 'commentinstrv2_flppl.json',
         # 'commentinstrv2.json',
-        'commentinstrv3.json',
+        # 'commentinstrv3.json',
+        'commentinstrv4.json',
+        'commentinstrv4_rge5.json',
     ]
     # only keep cleaned data
     filenames = [clean_starcoder_data(data_dir, filename) for filename in filenames]
@@ -405,7 +444,7 @@ def convert_starcoder_data(data_dir, output_dir):
             else:
                 examples = json.load(f)
 
-        output_path = os.path.join(output_dir, 'starcoder_'+filename.split('.')[0]+'.jsonl')
+        output_path = os.path.join(output_dir, 'starcoder_'+filename.split('_cleaned.json')[0]+'.jsonl')
         with open(output_path, "w") as fout:
             for idx, example in enumerate(examples):
                 if filename.startswith('commentinstr') and 'cleaned' not in filename:

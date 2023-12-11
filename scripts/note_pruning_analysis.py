@@ -240,7 +240,7 @@ def convert_example_to_str(idx, example):
 
     metadata = {k: v for k, v in example.items() if k!='messages'}
     messages = example['messages']
-    metadata['idx'] = idx
+    metadata['print_idx'] = idx
     metadata['n_turns'] = len(messages)
 
     s = ''
@@ -442,7 +442,9 @@ def save_text_viz_for_curriculum(path):
         # sample subsets for printing
         inds = sample_indices_given_scores(scores, portion, num_printed=100)
         def add_score_fn(example, idx):
-            example.update({'score': scores[inds[idx]]})
+            example.update({'score': scores[inds[idx]],
+                            'ind': inds[idx],
+                            'ind_pct': inds[idx]/len(ds)})
             return example
         ds_subset = ds.select(inds).map(add_score_fn, with_indices=True, keep_in_memory=True)
         write_ds_to_file_for_reading(
