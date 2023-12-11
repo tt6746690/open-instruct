@@ -227,7 +227,7 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
         sort_by,
         dataset,
         rel_tol=0.01,
-        max_iterations=10,
+        max_iterations=20,
     ):
     """run dppmap, but auto-tunes `gamma` to reach target_size. """
     
@@ -260,28 +260,35 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
             print(f'[autotune gamma] Set initial gamma={gamma} / M={M_closest} to reach target_size={target_size}')
 
         if len(df) > 0:
-            M_closest, gamma = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
+            M_closest, gamma_closest = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
             if np.abs(((M_closest-target_size)/target_size)) < rel_tol:
-                print(f'[autotune gamma] Terminate since gamma={gamma} / M={M_closest} '
+                print(f'[autotune gamma] Terminate since gamma={gamma_closest} / M={M_closest} '
                     f'is within {rel_tol} of target_size={target_size}')
                 return results
 
         if len(df) >= 2:
-            # Fit linear fn: M = m*γ + b
+            # Fit quadratic fn: M = quadratic_fn(gamma)
             # give more weight to closeby gamma & M
-            m, b = np.polyfit(
+            coeff = np.polyfit(
                 d['gamma'],
                 d['M'],
-                deg=1, 
-                w=1/np.abs(target_size-np.array(d['M']))**2
+                deg=2,
+                w=1/np.abs(target_size-np.array(d['M'])),
             )
-            gamma = (target_size-b) / m
-            gamma = np.round(gamma, 3 - int(np.floor(np.log10(abs(gamma)))) - 1) # round to 3 sig-dig
+            print(f'[autotune gamma] Fit quadratic fn: M = quad_fn(γ), coeff={coeff}')
+            slope = 2*coeff[0]*gamma + coeff[1]
+            if slope <= 1:
+                gamma = gamma*10 # increase prev gamma by 10x
+            else:
+                gamma = (np.poly1d(coeff)-target_size).roots[-1]
+                gamma = np.round(gamma, 3 - int(np.floor(np.log10(abs(gamma)))) - 1) # round to 3 sig-dig
+                gamma = min(1., gamma)
         else:
             if it == 0:
                 gamma = 2*gamma
             else:
                 gamma = 2*gamma if target_size > M_closest else .5*gamma
+
 
         results = parse_sort_by_and_compute_dppmap(
             sort_by=re.sub(r'gamma=auto([\d.e+-]+)', f'gamma={gamma}', sort_by), 
@@ -289,8 +296,7 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
         print(f"[autotune gamma] Iteration {it} tried gamma={gamma}, got M={results[1]['M']}")
 
     print(f'[autotune gamma] Reached max_iterations without finding a good gamma (gamma={gamma})')
-
-    return results
+    return None, None
 
 
 
