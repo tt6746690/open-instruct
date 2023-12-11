@@ -269,25 +269,31 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
         if len(df) >= 2:
             # Fit quadratic fn: M = quadratic_fn(gamma)
             # give more weight to closeby gamma & M
+            deg = 1
             coeff = np.polyfit(
                 d['gamma'],
                 d['M'],
-                deg=2,
+                deg=deg,
                 w=1/np.abs(target_size-np.array(d['M'])),
             )
             print(f'[autotune gamma] Fit quadratic fn: M = quad_fn(γ), coeff={coeff}')
-            slope = 2*coeff[0]*gamma + coeff[1]
+            if deg == 1:
+                slope = coeff[0]
+            elif deg == 2:
+                slope = 2*coeff[0]*gamma + coeff[1]
+            else:
+                raise ValueError(f'Invalid deg={deg}')
             if slope <= 1:
                 gamma = gamma*10 # increase prev gamma by 10x
             else:
-                gamma = (np.poly1d(coeff)-target_size).roots[-1]
+                gamma = np.max((np.poly1d(coeff)-target_size).roots)
                 gamma = np.round(gamma, 3 - int(np.floor(np.log10(abs(gamma)))) - 1) # round to 3 sig-dig
-                gamma = min(1., gamma)
+                gamma = max(min(1., gamma), 1e-8)
         else:
-            if it == 0:
-                gamma = 2*gamma
-            else:
+            if len(df) > 0:
                 gamma = 2*gamma if target_size > M_closest else .5*gamma
+            else:
+                gamma = 2*gamma
 
 
         results = parse_sort_by_and_compute_dppmap(
