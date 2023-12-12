@@ -37,7 +37,7 @@ fire
 flask
 vllm 
 # wpq: for mosaicml/mpt-7b
-triton-pre-mlir@git+https://github.com/vchiley/triton.git@triton_pre_mlir_sm90#subdirectory=python
+# triton-pre-mlir@git+https://github.com/vchiley/triton.git@triton_pre_mlir_sm90#subdirectory=python
 tensorboard
 omegaconf
 pynvml

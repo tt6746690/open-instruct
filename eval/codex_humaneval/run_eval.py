@@ -152,7 +152,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_num_examples",  type=int, default=None, help="Maximum number of examples to evaluate.")
     parser.add_argument("--model_name_or_path", type=str, default=None, help="If specified, we will load the model to generate the predictions.")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="If specified, we will load the tokenizer from here.")
-    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.") 
+    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.")
     parser.add_argument("--openai_engine", type=str, default=None, help="If specified, we will use the OpenAI API to generate the predictions.")
     parser.add_argument("--save_dir", type=str, default="results/codex_eval", help="Directory to save the results.")
     parser.add_argument("--eval_batch_size", type=int, default=1, help="Batch size for evaluation.")
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_vllm", action="store_true", help="If given, we will use the vllm library, which will likely increase the inference throughput.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
     parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
-    parser.add_argument("--max_new_tokens", type=int, default=512) 
+    parser.add_argument("--max_new_tokens", type=int, default=512)
 
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

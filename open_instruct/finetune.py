@@ -703,6 +703,7 @@ def main():
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
+                # `use_cache=True` incompatible with gradient checkpointing 
                 outputs = model(**batch, use_cache=False)                
                 loss = outputs.loss
                 # We keep track of the loss at each logged step
@@ -760,6 +761,26 @@ def main():
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
+
+        # #### prev code, commented during merge with upstream/main. keep to see if the new code works.
+        # ## wpq: unwrap the outputted wrapped model from `prepare()` to get the original model.
+        # unwrapped_model = accelerator.unwrap_model(model)
+        # # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
+        # # Otherwise, sometimes the model will be saved with only part of the parameters.
+        # # Also, accelerator needs to use the wrapped model to get the state_dict.
+        # state_dict = accelerator.get_state_dict(model)
+        # if args.use_lora:
+        #     # When using lora, the unwrapped model is a PeftModel, which doesn't support the is_main_process 
+        #     # and has its own save_pretrained function for only saving lora modules.
+        #     # We have to mannually specify the is_main_process outside the save_pretrained function.
+        #     if accelerator.is_main_process:
+        #         unwrapped_model.save_pretrained(args.output_dir, state_dict=state_dict)
+        # else:
+        #     unwrapped_model.save_pretrained(
+        #         args.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
+        #     )
+        # ####
+        
         save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
 
 

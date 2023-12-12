@@ -68,6 +68,10 @@ python scripts/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split.json \
     --model-name-or-path results/baselines/huggyllama/llama-7b
+<<<<<<< HEAD
+=======
+
+>>>>>>> 1b90dd444809936f3faea091bb9cdb31f8b00c5f
 
 
 echo "Downloading LIMA dataset..."

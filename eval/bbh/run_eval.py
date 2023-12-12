@@ -4,17 +4,12 @@ import re
 import json
 import tqdm
 import glob
-import random
+import random 
 import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import evaluate
 import torch
 from transformers import GPT2LMHeadModel
-from eval.utils import (
-    load_hf_lm_and_tokenizer,
-    generate_completions,
-    query_openai_chat_model,
-    dynamic_import_function,
-)
+from eval.utils import load_hf_lm_and_tokenizer, generate_completions, query_openai_chat_model, dynamic_import_function
 
 
 def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None, max_input_seq_len=None):

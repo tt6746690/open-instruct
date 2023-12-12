@@ -4,9 +4,9 @@ import json
 import time
 import asyncio
 import os
-from importlib import import_module
 from transformers import StoppingCriteria, StoppingCriteriaList
 from transformers import T5ForConditionalGeneration
+from importlib import import_module
 
 from open_instruct.finetune import encode_with_prompt_completion_format
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
@@ -41,7 +41,10 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
     num_return_sequences = generation_kwargs.get("num_return_sequences", 1)
     for i in range(0, len(prompts), batch_size):
         batch_prompts = prompts[i:i+batch_size]
-        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=add_special_tokens)
+        # Fix a bug: during evaluation, we add back special token by default. This will slightly improve the perf based on my tests. #38
+        # https://github.com/allenai/open-instruct/pull/38/files
+        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", 
+        add_special_tokens=add_special_tokens)
         batch_input_ids = tokenized_prompts.input_ids
         attention_mask = tokenized_prompts.attention_mask
 
