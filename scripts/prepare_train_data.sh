@@ -109,6 +109,9 @@ for input_file in data/raw_train/ultrachat/full/*.jsonl; do
 done
 
 
+echo "Downloading Alpacas dataset..."
+
+
 
 # ## flan v2 full dataset processing
 # 
