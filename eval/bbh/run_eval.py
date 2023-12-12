@@ -31,7 +31,7 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None,
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in examples:
         for n_shot in list(range(args.n_shot+1)[::-1]):
-            task_prompt_concat = get_task_prompt(n_shot) + "\n\nQ: " + example["input"]
+            prompt = get_task_prompt(n_shot) + "\n\nQ: " + example["input"]
             if args.use_chat_format:
                 messages = [{"role": "user", "content": prompt}]
                 prompt = chat_formatting_function(messages, add_bos=False)
@@ -180,6 +180,8 @@ def main(args):
                 new_prompt_fields = ['\n\n'.join(new_prompt_fields[:2])]+new_prompt_fields[2:]
             assert(len(new_prompt_fields) == 4)
             all_prompts[task_name] = new_prompt_fields
+    # ## previous impl. modified to above to enable using <=3 in-context examples when prompt is too long.
+    #
     #     with open(cot_prompt_file, "r") as f:
     #         task_name = os.path.basename(cot_prompt_file).split(".")[0]
     #         task_prompt = "".join(f.readlines()[2:])

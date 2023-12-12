@@ -2,6 +2,7 @@ import argparse
 import os
 import json
 import random
+import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import torch
 import evaluate
 import numpy as np
@@ -137,6 +138,7 @@ def main(args):
     prompts = []
     num_use_less_shots = 0
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
+
     for example in test_data:
         lang = example["lang"]
         
@@ -179,7 +181,7 @@ def main(args):
                 prompt += a_template
                 
             tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
-            if tokenized_prompt_len < max_input_seq_len:
+            if tokenized_prompt_len <= max_input_seq_len:
                 break
         if n_shot != args.n_shot:
             num_use_less_shots += 1

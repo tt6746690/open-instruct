@@ -2,8 +2,8 @@ import argparse
 import os; os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 import json
 import random
+import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import torch
-import vllm
 from eval.utils import (
     generate_completions, 
     load_hf_lm_and_tokenizer, 
@@ -25,7 +25,6 @@ def main(args):
         test_data = random.sample(test_data, args.max_num_examples)
     print("Number of examples:", len(test_data))
 
-    # wpq: remove `example["prompt"]` at the end! it's a bug.
     if args.use_chat_format:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
@@ -42,6 +41,7 @@ def main(args):
         
     if args.model_name_or_path:
         if args.use_vllm:
+            import vllm
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
@@ -52,7 +52,7 @@ def main(args):
                 n=args.unbiased_sampling_size_n,
                 temperature=args.temperature, 
                 top_p=0.95,
-                max_tokens=512,
+                max_tokens=args.max_new_tokens,
                 stop=["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
             )
             generations = model.generate(prompts, sampling_params)
@@ -78,6 +78,12 @@ def main(args):
             # Because many tokenizers will treat the word after space differently from the original word alone, 
             # to be consistent, we add a space before tokenization and remove it after tokenization.
             stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]
+
+            if isinstance(model, GPT2LMHeadModel):
+                generation_kwargs = {'max_length': model.config.max_position_embeddings} # 1024
+            else:
+                generation_kwargs = {'max_new_tokens': args.max_new_tokens}
+
             outputs_per_sampling_iter = []
             for sampling_iter in range(args.unbiased_sampling_size_n):
                 print(f"Sampling iter: {sampling_iter} / {args.unbiased_sampling_size_n}")
@@ -85,13 +91,13 @@ def main(args):
                     model=model,
                     tokenizer=tokenizer,
                     prompts=prompts,
-                    max_new_tokens=512,
                     batch_size=args.eval_batch_size,
                     stop_id_sequences=stop_sequences,
                     num_return_sequences=1,  # we don't use the hf num_return_sequences, because otherwise the real batch size will be multiplied by it and often cause oom.
                     do_sample=True,  # if only pass@1 is evaluated, we do greedy decoding.
                     top_p=0.95,
                     temperature=args.temperature,
+                    **generation_kwargs,
                 )
                 outputs_per_sampling_iter.append(samping_outputs)
             # regroup the outputs to match the number of test data.
@@ -146,6 +152,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_num_examples",  type=int, default=None, help="Maximum number of examples to evaluate.")
     parser.add_argument("--model_name_or_path", type=str, default=None, help="If specified, we will load the model to generate the predictions.")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="If specified, we will load the tokenizer from here.")
+    parser.add_argument("--use_slow_tokenizer", action="store_true", help="If given, we will use the slow tokenizer.") 
     parser.add_argument("--openai_engine", type=str, default=None, help="If specified, we will use the OpenAI API to generate the predictions.")
     parser.add_argument("--save_dir", type=str, default="results/codex_eval", help="Directory to save the results.")
     parser.add_argument("--eval_batch_size", type=int, default=1, help="Batch size for evaluation.")
@@ -156,10 +163,8 @@ if __name__ == "__main__":
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_vllm", action="store_true", help="If given, we will use the vllm library, which will likely increase the inference throughput.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
-<<<<<<< HEAD
     parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
-=======
->>>>>>> 66b1e34... eval gpt2 code
+    parser.add_argument("--max_new_tokens", type=int, default=512) 
 
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

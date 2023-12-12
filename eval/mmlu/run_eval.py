@@ -1,6 +1,7 @@
 
 import argparse
 import os
+import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import torch
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ import time
 from eval.mmlu.categories import subcategories, categories
 from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 from transformers import GPT2LMHeadModel
+
 
 choices = ["A", "B", "C", "D"]
 
@@ -67,7 +69,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             # truncate the question on the left.
             if k == -1:
                 tokenized_prompt_end = tokenizer(prompt_end, return_tensors="pt", add_special_tokens=False).input_ids
-                prompt_other_than_prompt_end = wrap_with_chat_format(train_prompt, args.use_chat_format, args.chat_format_version)
+                prompt_other_than_prompt_end = wrap_with_chat_format(train_prompt)
                 tokenized_prompt_other_than_prompt_end = tokenizer(prompt_other_than_prompt_end, return_tensors="pt", add_special_tokens=False).input_ids
                 train_prompt_max_len = max_input_seq_len-tokenized_prompt_other_than_prompt_end.shape[-1]
                 prompt_end = tokenizer.decode(tokenized_prompt_end.squeeze()[-train_prompt_max_len:], skip_special_tokens=False)
@@ -75,7 +77,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             
             train_prompt = gen_prompt(dev_df, subject, k)
             prompt = train_prompt + prompt_end
-            prompt = wrap_with_chat_format(prompt.strip(), args.use_chat_format, args.chat_format_version)
+            prompt = wrap_with_chat_format(prompt.strip())
                 
             tokenized_prompt = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids
             if tokenized_prompt.shape[-1] < max_input_seq_len:
@@ -264,11 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
-<<<<<<< HEAD
     parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
-=======
-    parser.add_argument("--chat_format_version", type=int, default=1)
->>>>>>> 3e05f9b... add
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.

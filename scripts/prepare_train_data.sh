@@ -64,18 +64,10 @@ echo "Downloading ShareGPT dataset..."
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part1_html_cleaned.json
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part2_html_cleaned.json
 echo "Splitting the ShareGPT dataset..."
-
-# wpq: Use jupyter notebook to run the following code.
-#
-# 
-# python scripts/split_sharegpt_conversations.py \
-#     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
-#     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split.json \
-#     --model-name-or-path ../hf_llama_models/7B/
 python scripts/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split.json \
-    --model-name-or-path  mosaicml/mpt-7b
+    --model-name-or-path results/baselines/huggyllama/llama-7b
 
 
 echo "Downloading LIMA dataset..."
@@ -116,9 +108,6 @@ for input_file in data/raw_train/ultrachat/full/*.jsonl; do
 done
 
 
-echo "Downloading Alpacas dataset..."
-
-
 
 # ## flan v2 full dataset processing
 # 
@@ -142,13 +131,6 @@ python scripts/split_sharegpt_conversations.py \
     --out-file data/raw_train/ultrachat/ultrachat_200k_test_splitlongconv.json \
     --model-name-or-path results/baselines/huggyllama/llama-7b \
     --max-length 2048
-
-# # reformat ultrachat 200k
-python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset ultrachat
-
-## format starcoder data
-python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train --output_dir data/processed --dataset starcoder
-
 
 
 echo "Reformatting the datasets..."

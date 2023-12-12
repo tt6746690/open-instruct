@@ -3,6 +3,7 @@ import os
 import re
 import json
 import random
+import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import torch
 import evaluate
 from transformers import GPT2LMHeadModel
@@ -100,7 +101,6 @@ def main(args):
         if n_shot != args.n_shot:
             print(f'n_shot: {args.n_shot} -> {n_shot}')
         prompts.append(prompt)
-
 
     if args.model_name_or_path:
         # get the last token because the tokenizer may add space tokens at the start.

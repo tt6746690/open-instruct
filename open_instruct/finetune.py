@@ -29,9 +29,9 @@ from transformers import (
     get_scheduler,
     GPTNeoXTokenizerFast,
     GPT2Tokenizer,
+    GPT2TokenizerFast,
     OPTForCausalLM,
     BitsAndBytesConfig,
-    GPT2TokenizerFast,
 )
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from llm.monitor import print_gpu_utilization
@@ -453,7 +453,7 @@ def main():
                 config=config,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 trust_remote_code=bool('mpt' in args.model_name_or_path),
-                torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+                torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32, # wpq: during 12/12 rebase. float16 might experience instability issue. set to float32 for now.
             )
     else:
         logger.info("Training new model from scratch")
