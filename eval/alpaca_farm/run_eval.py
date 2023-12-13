@@ -43,7 +43,7 @@ def main(args):
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
-                max_tokens=2048,
+                max_tokens=args.max_new_tokens,
             )
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
@@ -60,7 +60,7 @@ def main(args):
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
-                max_new_tokens=2048,
+                max_new_tokens=args.max_new_tokens,
                 do_sample=False,
                 temperature=0,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
@@ -73,7 +73,7 @@ def main(args):
             instances=[{"id": str(i), "prompt": prompt} for i, prompt in enumerate(prompts)],
             batch_size=args.eval_batch_size if args.eval_batch_size else 10,
             output_path=openai_query_cache_path,
-            max_tokens=2048,
+            max_tokens=args.max_new_tokens,
             temperature=0,
             reuse_existing_outputs=True,
         )
@@ -94,6 +94,7 @@ def main(args):
         annotators_config=args.annotators_config,
         output_path=args.save_dir,
         is_return_instead_of_print=True,
+        caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
     )
 
     prices = np.array([x['price_per_example'] for x in annotations], dtype=np.float32)
@@ -136,7 +137,7 @@ if __name__ == "__main__":
     parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
     parser.add_argument("--use_vllm", action="store_true", help="If given, we will use vLLM to generate the predictions - much faster.")
     parser.add_argument("--annotators_config", type=str, default="alpaca_eval_gpt4_0314")
-    parser.add_argument("--max_num_examples", type=int, default=None, help="maximum number of examples to evaluate.")
+    parser.add_argument("--max_num_examples", type=int, default=8192, help="maximum number of examples to evaluate.")
 
     args = parser.parse_args()
 

@@ -26,14 +26,10 @@ termcolor
 jsonlines
 unidic-lite
 einops
-<<<<<<< HEAD
 # wpq: gives cuda version 12.1 mismatch with version pytorch is compiled with (11.8) error and it doesn't seem to be an easy fix.
 # open-instruct uses flash-attn for llama model. so fix this if I need to use llama for anything.
-# flash-attn
+# flash-attn==2.2.2
 scipy
-=======
-flash-attn==2.2.2
->>>>>>> 98ccfb460ae4fb98140783b6cf54241926160a06
 auto-gptq
 fire
 -e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/alpaca_eval # custom bug fixes
