@@ -123,7 +123,7 @@ def main(args):
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         args.model_name_or_path,
-        use_fast=False, # prefer slow tokenizer.
+        use_fast=False,
     )
     new_content = split_all(content, args.begin, args.end, tokenizer, args.max_length)
     print(f"after split:  {len(new_content)}")

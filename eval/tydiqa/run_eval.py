@@ -13,7 +13,6 @@ from eval.utils import (
     query_openai_chat_model,
     dynamic_import_function,
 )
-from transformers import GPT2LMHeadModel
 
 
 

@@ -41,10 +41,7 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
     num_return_sequences = generation_kwargs.get("num_return_sequences", 1)
     for i in range(0, len(prompts), batch_size):
         batch_prompts = prompts[i:i+batch_size]
-        # Fix a bug: during evaluation, we add back special token by default. This will slightly improve the perf based on my tests. #38
-        # https://github.com/allenai/open-instruct/pull/38/files
-        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", 
-        add_special_tokens=add_special_tokens)
+        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=add_special_tokens)
         batch_input_ids = tokenized_prompts.input_ids
         attention_mask = tokenized_prompts.attention_mask
 

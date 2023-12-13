@@ -177,14 +177,6 @@ def main(args):
 
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-    if not os.path.exists(os.path.join(args.save_dir, "csvs")):
-        os.makedirs(os.path.join(args.save_dir, "csvs"))
-
-    # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
-    if isinstance(model, GPT2LMHeadModel):
-        max_input_seq_len = model.config.max_position_embeddings-1
-    else:
-        max_input_seq_len = 2048-1
 
     # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
     if isinstance(model, GPT2LMHeadModel):
@@ -228,7 +220,7 @@ def main(args):
             test_df["choice{}_probs".format(choice)] = probs[:, j]
         test_df.to_csv(
             os.path.join(
-                args.save_dir, "csvs", "{}.csv".format(subject)
+                args.save_dir, "{}.csv".format(subject)
             ),
             index=None,
         )

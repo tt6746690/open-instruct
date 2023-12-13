@@ -12,7 +12,6 @@ git+https://github.com/huggingface/peft.git
 evaluate
 tokenizers
 protobuf
-# transformers
 -e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/transformers
 huggingface_hub
 openai
