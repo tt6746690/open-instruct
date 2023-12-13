@@ -72,6 +72,7 @@ def main(args):
     #                     new_prompt_fields.append(prompt_field)
     #             task_prompt = "\n\n".join(new_prompt_fields)
     #         all_prompts[task_name] = task_prompt
+    #
     os.makedirs(args.save_dir, exist_ok=True)
     os.makedirs(os.path.join(args.save_dir, "predictions"), exist_ok=True)
 
@@ -155,7 +156,7 @@ def main(args):
                     max_new_tokens=10 if args.no_cot else args.max_new_tokens, # multiple choice answers, e.g., ' (G).' requires just 5 tokens
                     temperature=0,
                     batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-                    stop_id_sequences=[[stop_sequence]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                    stop_id_sequences=[stop_sequence] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
                 )
         else:
             instances = []
