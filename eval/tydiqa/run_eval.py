@@ -185,10 +185,7 @@ def main(args):
             if args.use_chat_format:
                 messages = [{"role": "user", "content": prompt}]
                 prompt = chat_formatting_function(messages, add_bos=False)
-                if prompt[-1] in ["\n", " "]:
-                    prompt += a_template
-                else:
-                    prompt += " " + a_template
+                prompt += a_template if prompt[-1] in ["\n", " "] else " " + a_template
             else:
                 prompt += a_template
                 
@@ -208,7 +205,7 @@ def main(args):
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=50,
-                stop=["\n"],
+                stop=["\n"] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             )
             # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
             generations = model.generate(prompts, sampling_params)
@@ -224,7 +221,7 @@ def main(args):
                 prompts=prompts,
                 max_new_tokens=args.max_new_tokens,
                 batch_size=args.eval_batch_size,
-                stop_id_sequences=[[new_line_token]]
+                stop_id_sequences=[[new_line_token]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             )
             # remove unnecessary space
             outputs = [output.strip() for output in outputs]

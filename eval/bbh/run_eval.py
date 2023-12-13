@@ -122,10 +122,7 @@ def main(args):
                     if args.use_chat_format:
                         messages = [{"role": "user", "content": prompt}]
                         prompt = chat_formatting_function(messages, add_bos=False)
-                        if prompt[-1] in ["\n", " "]:
-                            prompt += "A:"
-                        else:
-                            prompt += " A:"
+                        prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
                     else:
                         prompt += "\nA:"
                     tokenized_prompt_len = len(tokenizer(prompt, add_special_tokens=False)['input_ids'])
@@ -141,7 +138,7 @@ def main(args):
                 sampling_params = vllm.SamplingParams(
                     temperature=0,
                     max_tokens=512,
-                    stop=["\n\n"],
+                    stop=["\n\n"] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
                 )
                 # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
                 generations = model.generate(prompts, sampling_params)
@@ -159,7 +156,7 @@ def main(args):
                     max_new_tokens=10 if args.no_cot else args.max_new_tokens, # multiple choice answers, e.g., ' (G).' requires just 5 tokens
                     temperature=0,
                     batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-                    stop_id_sequences=[[stop_sequence]],
+                    stop_id_sequences=[[stop_sequence]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
                 )
         else:
             instances = []
@@ -182,18 +179,14 @@ def main(args):
         for example, output in zip(task_examples, outputs):
             example["raw_output"] = output
             
-            # extract the first answer after `So the answer is` and before the next period.
+            # extract the first answer after `the answer is` and before the next period.
             # if there is no such answer, we will just use the raw output.
-            extracted_answer = re.search(r"So the answer is (.*?)\.", output)
+            extracted_answer = re.search(r"[t|T]he answer is (.*?)\.", output)
             if extracted_answer:
-                prediction = extracted_answer.group(1).strip()
+                example["prediction"] = extracted_answer.group(1).strip()
             else:
-                # only keep the first part of the output - this is mainly for vanilla language models.
-                output = output.strip().split("\n\n")[0].strip()
-                prediction = output.strip()
-
-            example["prediction"] = prediction
-            predictions.append(prediction)
+                example["prediction"] = output.strip()
+            predictions.append(example["prediction"])
         
         with open(os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl"), "w") as fout:
             for example in task_examples:

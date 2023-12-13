@@ -15,11 +15,8 @@ def main(args):
     random.seed(42)
     os.makedirs(args.save_dir, exist_ok=True)
 
-    if args.reference_path != 'alpaca_eval_data':
-        raise NotImplementedError('Only support alpaca_eval_data for now. Need to work with `max_num_examples` in case I want to use other reference generation.')
-
     logging.info("loading data and model...")
-    alpaca_eval_data = datasets.load_dataset("tatsu-lab/alpaca_farm", "alpaca_farm_evaluation")["eval"]
+    alpaca_eval_data = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval")["eval"]
 
     if args.max_num_examples and len(alpaca_eval_data) > args.max_num_examples:
         inds = random.sample(range(len(alpaca_eval_data)), args.max_num_examples)
@@ -29,7 +26,7 @@ def main(args):
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in alpaca_eval_data:
-        prompt = example["instruction"] + "\n\n" + example["input"] if example["input"] != "" else example["instruction"]
+        prompt = example["instruction"]
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, add_bos=False)
@@ -46,7 +43,7 @@ def main(args):
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
-                max_tokens=2048,  # maximum we can pass to roberta
+                max_tokens=2048,
             )
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
@@ -79,7 +76,7 @@ def main(args):
             max_tokens=2048,
             temperature=0,
             reuse_existing_outputs=True,
-        ) 
+        )
         outputs = [result["output"] for result in results]
 
     model_name = os.path.basename(os.path.normpath(args.model_name_or_path)) if args.model_name_or_path is not None else args.openai_engine
@@ -120,7 +117,13 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reference_path", type=str, default="data/eval/alpaca_farm/davinci_003_outputs_2048_token.json", help="Path to the reference outputs. Alpaca_eval leaderboard use davinci_003 to generate the reference outputs, but they limit the max_tokens to 300. Here regenerated reference outputs with max_tokens=2048.")
+    parser.add_argument("--reference_path", type=str, default="data/eval/alpaca_farm/davinci_003_outputs_2048_token.json", help=
+                        "Path to the reference outputs. "
+                        "Alpaca_eval leaderboard use text-davinci-003 to generate the reference outputs, "
+                        "but they limit the max_tokens to 300, which is a bit unfair for text-davinci-003. "
+                        "Here we keep this default setup to make numbers comparable to their leaderboard. "
+                        "But you can also use the regenerated reference outputs with max_tokens=2048 "
+                        "hosted at https://huggingface.co/datasets/hamishivi/alpaca-farm-davinci-003-2048-token.",)
     parser.add_argument("--save_dir", type=str, default="results/alpaca_farm")
     parser.add_argument("--model_name_or_path", type=str, default=None, help="If specified, we will load the model to generate the predictions.")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="If specified, we will load the tokenizer from here.")
