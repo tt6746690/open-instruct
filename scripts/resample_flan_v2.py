@@ -13,76 +13,54 @@ def shorten_task_name(x):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--flan_v2_data_dir", type=str, default="data/flan_v2")
-    parser.add_argument("--total_num_samples", type=int, default=100000)
-    parser.add_argument("--output_path", type=str, default="data/flan_v2/flan_v2_100k.jsonl")
+    parser.add_argument("--flan_v2_data_dir", type=str, default="../open-instruct/data/raw_train/flan_v2")
+    parser.add_argument("--total_num_samples", type=int, default=50000)
+    parser.add_argument("--output_path", type=str, default="data/raw_train/flan_v2/flan_v2_50k.jsonl")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--portions_type", type=str, default="flan2022v1")
     args = parser.parse_args()
     random.seed(args.seed)
 
-    # The following portions are based on the flan_v2 code: https://github.com/google-research/FLAN/blob/main/flan/v2/run_example.py
-    # This is used to build tulu mixture v1.
-    # portions = {
-    #     "flan_zsopt": 0.1,
-    #     "flan_fsopt": 0.1,
-    #     "flan_zsnoopt": 0.1,
-    #     "flan_fsnoopt": 0.1,
-    #     "t0_zsopt": 0.08,
-    #     "t0_fsopt": 0.08,
-    #     "t0_zsnoopt": 0.08,
-    #     "t0_fsnoopt": 0.08,
-    #     "niv2_zsopt": 0.1,
-    #     "niv2_fsopt": 0.1,
-    #     "cot_zsopt": 0.025,
-    #     "cot_fsopt": 0.025,
-    #     "dialog_zsopt": 0.015,
-    #     "dialog_fsopt": 0.015,
-    # }
-
-
-    # # For tulu mixture v2, for only keep the few shot ones since those zero-shot outputs might not be optimal in terms of styles.
-    # # We also remove dialog since it might be too easy for LLMs.
-    # portions = {
-    #     "flan_zsopt": 0,
-    #     "flan_fsopt": 0.2,
-    #     "flan_zsnoopt": 0,
-    #     "flan_fsnoopt": 0.2,
-    #     "t0_zsopt": 0,
-    #     "t0_fsopt": 0.16,
-    #     "t0_zsnoopt": 0,
-    #     "t0_fsnoopt": 0.16,
-    #     "niv2_zsopt": 0,
-    #     "niv2_fsopt": 0.23,
-    #     "cot_zsopt": 0,
-    #     "cot_fsopt": 0.05,
-    #     "dialog_zsopt": 0,
-    #     "dialog_fsopt": 0,
-    # }
-
-    # for flan2022_submix:
-    # ('flan2021_submix', 0.4),  # mixing weight = 40%
-    #       ('flan_zsopt', 1),      # mixing weight = 25%
-    #       ('flan_fsopt', 1),      # mixing weight = 25%
-    #       ('flan_zsnoopt', 1),    # mixing weight = 25%
-    #       ('flan_fsnoopt', 1),    # mixing weight = 25%
-    # ('t0_submix', 0.32),       # mixing weight = 32%
-    #       ('t0_zsopt', 1),      # mixing weight = 25%
-    #       ('t0_fsopt', 1),      # mixing weight = 25%
-    #       ('t0_zsnoopt', 1),    # mixing weight = 25%
-    #       ('t0_fsnoopt', 1),    # mixing weight = 25%
-    # ('niv2_submix', 0.2),      # mixing weight = 20%
-    #       ('niv2_zsopt', 1),    # mixing weight = 50%
-    #       ('niv2_fsopt', 1),    # mixing weight = 50%
-    # ('cot_submix', 0.05),      # mixing weight = 5%
-    #       ('cot_zsopt', 1),    # mixing weight = 50%
-    #       ('cot_fsopt', 1),    # mixing weight = 50%
-    # ('dialog_submix', 0.03),   # mixing weight = 3%
-    #       ('dialog_zsopt', 1),    # mixing weight = 50%
-    #       ('dialog_fsopt', 1),    # mixing weight = 50%
-
     ## SirNeural/flan_v2
-    if args.portions_type == 'flan2022v1':
+    if args.portion_type == 'tulu_v1_mix':
+        # The following portions are based on the flan_v2 code: https://github.com/google-research/FLAN/blob/main/flan/v2/run_example.py
+        # This is used to build tulu mixture v1.
+        portions = {
+            "flan_zsopt": 0.1,
+            "flan_fsopt": 0.1,
+            "flan_zsnoopt": 0.1,
+            "flan_fsnoopt": 0.1,
+            "t0_zsopt": 0.08,
+            "t0_fsopt": 0.08,
+            "t0_zsnoopt": 0.08,
+            "t0_fsnoopt": 0.08,
+            "niv2_zsopt": 0.1,
+            "niv2_fsopt": 0.1,
+            "cot_zsopt": 0.025,
+            "cot_fsopt": 0.025,
+            "dialog_zsopt": 0.015,
+            "dialog_fsopt": 0.015,
+        }
+    elif args.portion_type == 'tulu_v2_mix':
+        # For tulu mixture v2, for only keep the few shot ones since those zero-shot outputs might not be optimal in terms of styles.
+        # We also remove dialog since it might be too easy for LLMs.
+        portions = {
+            "flan_zsopt": 0,
+            "flan_fsopt": 0.2,
+            "flan_zsnoopt": 0,
+            "flan_fsnoopt": 0.2,
+            "t0_zsopt": 0,
+            "t0_fsopt": 0.16,
+            "t0_zsnoopt": 0,
+            "t0_fsnoopt": 0.16,
+            "niv2_zsopt": 0,
+            "niv2_fsopt": 0.23,
+            "cot_zsopt": 0,
+            "cot_fsopt": 0.05,
+            "dialog_zsopt": 0,
+            "dialog_fsopt": 0,
+        }
+    elif args.portions_type == 'flan2022v1':
         portions = {
             'flan_zs_opt_train':   .4 * .25,
             'flan_fs_opt_train':   .4 * .25,
@@ -135,6 +113,7 @@ if __name__ == "__main__":
         "dialog_fs_opt_train": 22528240
     }
 
+
     assert sum(portions.values()) == 1.0
     assert all(os.path.isfile(os.path.join(args.flan_v2_data_dir, f'{x}.jsonl')) for x in portions.keys())
 
@@ -142,8 +121,10 @@ if __name__ == "__main__":
 
     with open(args.output_path, "w") as fout:
         for task_name, num_sample in num_samples.items():
+            if num_sample == 0:
+                continue
             print(f"Sampling {num_sample} samples from {task_name}")
-            task_data_path = os.path.join(args.flan_v2_data_dir, f"{task_name}.jsonl")
+            task_data_path = os.path.join(args.flan_v2_data_dir, task_name, f"{task_name}.jsonl")
             # randomly sample num_sample lines from task_data_path, the data might be very large so we can't load it all into memory
             # we need to first count the total number of lines in the file and then only load the lines we need
             if task_name not in num_lines_dict:

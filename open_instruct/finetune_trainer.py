@@ -21,6 +21,7 @@ import os
 import sys
 import json
 import re
+import warnings
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List
 from functools import partial
@@ -48,10 +49,10 @@ from transformers import (
     GPT2Tokenizer,
     GPT2TokenizerFast, 
     OPTForCausalLM,
+    Trainer,
 )
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers.trainer_utils import get_last_checkpoint
-from transformers import Trainer
 
 
 # ##### wpq: sub-class `get_train_dataloader` to add option to not shuffle the dataset
@@ -94,224 +95,6 @@ class MyTrainer(Trainer):
             else:
                 raise ValueError(f'{self.args.dataloader_sampler} not supported.')
         
-# #####
-
-# ##### wpq: avoid import error
-# # from safe_save_trainer import SafeSaveTrainer
-# import os
-# from pathlib import Path
-# from packaging import version
-# from transformers import Trainer, is_torch_tpu_available
-# from transformers.deepspeed import is_deepspeed_zero3_enabled
-# from transformers.utils import is_sagemaker_mp_enabled, WEIGHTS_NAME
-# from transformers.utils import logging as hf_logging
-# from transformers.trainer_utils import ShardedDDPOption
-# from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType, FullStateDictConfig
-# from typing import Optional
-
-# if is_sagemaker_mp_enabled():
-#     import smdistributed.modelparallel.torch as smp
-#     from smdistributed.modelparallel import __version__ as SMP_VERSION
-
-#     IS_SAGEMAKER_MP_POST_1_10 = version.parse(SMP_VERSION) >= version.parse("1.10")
-
-#     from transformers.trainer_pt_utils import smp_forward_backward, smp_forward_only, smp_gather, smp_nested_concat
-# else:
-#     IS_SAGEMAKER_MP_POST_1_10 = False
-
-
-# # ### wpq: import for fix resuming PeftModel checkpoints in Trainer
-# # # https://github.com/huggingface/transformers/pull/24274/files
-# # from transformers.trainer import (
-# #     CONFIG_NAME, 
-# #     ADAPTER_WEIGHTS_NAME, 
-# #     ADAPTER_SAFE_WEIGHTS_NAME, 
-# #     WEIGHTS_INDEX_NAME,
-# #     SAFE_WEIGHTS_NAME,
-# #     SAFE_WEIGHTS_INDEX_NAME)
-# # from transformers import PretrainedConfig
-# # from transformers import __version__
-# # from transformers.utils import is_safetensors_available, is_peft_available
-# # if is_safetensors_available():
-# #     import safetensors.torch
-# # if is_peft_available():
-# #     from peft import PeftModel
-# # from transformers.modeling_utils import load_sharded_checkpoint
-# # ###
-
-# logger = hf_logging.get_logger(__name__)
-
-# class SafeSaveTrainer(Trainer):
-
-#     def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
-#         """
-#         Will save the model, so you can reload it using `from_pretrained()`.
-#         Will only save from the main process.
-#         """
-
-#         if output_dir is None:
-#             output_dir = self.args.output_dir
-
-#         if is_torch_tpu_available():
-#             self._save_tpu(output_dir)
-#         elif is_sagemaker_mp_enabled():
-#             # Calling the state_dict needs to be done on the wrapped model and on all processes.
-#             os.makedirs(output_dir, exist_ok=True)
-#             state_dict = self.model_wrapped.state_dict()
-#             if self.args.should_save:
-#                 self._save(output_dir, state_dict=state_dict)
-#             if IS_SAGEMAKER_MP_POST_1_10:
-#                 # 'user_content.pt' indicates model state_dict saved with smp >= 1.10
-#                 Path(os.path.join(output_dir, "user_content.pt")).touch()
-#         elif (
-#             ShardedDDPOption.ZERO_DP_2 in self.args.sharded_ddp
-#             or ShardedDDPOption.ZERO_DP_3 in self.args.sharded_ddp
-#             or self.fsdp is not None
-#         ):
-#             full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-#             with FSDP.state_dict_type(self.model, StateDictType.FULL_STATE_DICT, full_state_dict_config):
-#                 state_dict = self.model.state_dict()
-
-#             if self.args.should_save:
-#                 self._save(output_dir, state_dict=state_dict)
-#         # wpq: fix `SafeSaveTrainer` has no `deepspeed` attribute
-#         elif hasattr(self, 'deepspeed') and self.deepspeed:
-#             # this takes care of everything as long as we aren't under zero3
-#             if self.args.should_save:
-#                 self._save(output_dir)
-
-#             if is_deepspeed_zero3_enabled():
-#                 # It's too complicated to try to override different places where the weights dump gets
-#                 # saved, so since under zero3 the file is bogus, simply delete it. The user should
-#                 # either user deepspeed checkpoint to resume or to recover full weights use
-#                 # zero_to_fp32.py stored in the checkpoint.
-#                 if self.args.should_save:
-#                     file = os.path.join(output_dir, WEIGHTS_NAME)
-#                     if os.path.isfile(file):
-#                         # logger.info(f"deepspeed zero3: removing {file}, see zero_to_fp32.py to recover weights")
-#                         os.remove(file)
-
-#                 # now save the real model if stage3_gather_16bit_weights_on_model_save=True
-#                 # if false it will not be saved.
-#                 # This must be called on all ranks
-#                 if not self.deepspeed.save_16bit_model(output_dir, WEIGHTS_NAME):
-#                     logger.warning(
-#                         "deepspeed.save_16bit_model didn't save the model, since"
-#                         " stage3_gather_16bit_weights_on_model_save=false. Saving the full checkpoint instead, use"
-#                         " zero_to_fp32.py to recover weights"
-#                     )
-#                     self.deepspeed.save_checkpoint(output_dir)
-
-#         elif self.args.should_save:
-#             self._save(output_dir)
-
-#         # Push to the Hub when `save_model` is called by the user.
-#         if self.args.push_to_hub and not _internal_call:
-#             self.push_to_hub(commit_message="Model save")
-
-#     # fix resuming peftmodel checkpoint in Trainer `https://github.com/huggingface/transformers/pull/24274`
-#     # merged to main: Jun 20. latest v4.31.0 has the change
-#     # uncomment if use <v.4.31.0
-#     def _load_from_checkpoint(self, resume_from_checkpoint, model=None):
-#         if model is None:
-#             model = self.model
-
-#         config_file = os.path.join(resume_from_checkpoint, CONFIG_NAME)
-#         adapter_weights_file = os.path.join(resume_from_checkpoint, ADAPTER_WEIGHTS_NAME)
-#         adapter_safe_weights_file = os.path.join(resume_from_checkpoint, ADAPTER_SAFE_WEIGHTS_NAME)
-#         weights_file = os.path.join(resume_from_checkpoint, WEIGHTS_NAME)
-#         weights_index_file = os.path.join(resume_from_checkpoint, WEIGHTS_INDEX_NAME)
-#         safe_weights_file = os.path.join(resume_from_checkpoint, SAFE_WEIGHTS_NAME)
-#         safe_weights_index_file = os.path.join(resume_from_checkpoint, SAFE_WEIGHTS_INDEX_NAME)
-
-#         if not any(
-#             os.path.isfile(f)
-#             for f in [
-#                 weights_file,
-#                 safe_weights_file,
-#                 weights_index_file,
-#                 safe_weights_index_file,
-#                 adapter_weights_file,
-#                 adapter_safe_weights_file,
-#             ]
-#         ):
-#             raise ValueError(f"Can't find a valid checkpoint at {resume_from_checkpoint}")
-
-#         logger.info(f"Loading model from {resume_from_checkpoint}.")
-
-#         if os.path.isfile(config_file):
-#             config = PretrainedConfig.from_json_file(config_file)
-#             checkpoint_version = config.transformers_version
-#             if checkpoint_version is not None and checkpoint_version != __version__:
-#                 logger.warning(
-#                     f"You are resuming training from a checkpoint trained with {checkpoint_version} of "
-#                     f"Transformers but your current version is {__version__}. This is not recommended and could "
-#                     "yield to errors or unwanted behaviors."
-#                 )
-
-#         if os.path.isfile(weights_file) or os.path.isfile(safe_weights_file):
-#             # If the model is on the GPU, it still works!
-#             if is_sagemaker_mp_enabled():
-#                 if os.path.isfile(os.path.join(resume_from_checkpoint, "user_content.pt")):
-#                     # If the 'user_content.pt' file exists, load with the new smp api.
-#                     # Checkpoint must have been saved with the new smp api.
-#                     smp.resume_from_checkpoint(
-#                         path=resume_from_checkpoint, tag=WEIGHTS_NAME, partial=False, load_optimizer=False
-#                     )
-#                 else:
-#                     # If the 'user_content.pt' file does NOT exist, load with the old smp api.
-#                     # Checkpoint must have been saved with the old smp api.
-#                     if hasattr(self.args, "fp16") and self.args.fp16 is True:
-#                         logger.warning(
-#                             "Enabling FP16 and loading from smp < 1.10 checkpoint together is not suppported."
-#                         )
-#                     state_dict = torch.load(weights_file, map_location="cpu")
-#                     # Required for smp to not auto-translate state_dict from hf to smp (is already smp).
-#                     state_dict["_smp_is_partial"] = False
-#                     load_result = model.load_state_dict(state_dict, strict=True)
-#                     # release memory
-#                     del state_dict
-#             elif self.is_fsdp_enabled:
-#                 from accelerate.utils import load_fsdp_model
-#                 load_fsdp_model(self.accelerator.state.fsdp_plugin, self.accelerator, model, resume_from_checkpoint)
-#             else:
-#                 # We load the model state dict on the CPU to avoid an OOM error.
-#                 if self.args.save_safetensors and os.path.isfile(safe_weights_file):
-#                     state_dict = safetensors.torch.load_file(safe_weights_file, device="cpu")
-#                 else:
-#                     state_dict = torch.load(weights_file, map_location="cpu")
-
-#                 # workaround for FSDP bug https://github.com/pytorch/pytorch/issues/82963
-#                 # which takes *args instead of **kwargs
-#                 load_result = model.load_state_dict(state_dict, False)
-#                 # release memory
-#                 del state_dict
-#                 self._issue_warnings_after_load(load_result)
-
-#         # Load adapters following PR # 24096
-#         elif is_peft_available() and isinstance(model, PeftModel):
-#             # If train a model using PEFT & LoRA, assume that adapter have been saved properly.
-#             if hasattr(model, "active_adapter") and hasattr(model, "load_adapter"):
-#                 if os.path.exists(resume_from_checkpoint):
-#                     model.load_adapter(resume_from_checkpoint, model.active_adapter)
-#                 else:
-#                     logger.warning(
-#                         "The intermediate checkpoints of PEFT may not be saved correctly, "
-#                         f"consider using a custom callback to save {ADAPTER_WEIGHTS_NAME} in corresponding saving folders. "
-#                         "Check some examples here: https://github.com/huggingface/peft/issues/96"
-#                     )
-#             else:
-#                 logger.warning("Could not load adapter model, make sure to have `peft>=0.3.0` installed")
-#         else:
-#             # We load the sharded checkpoint
-#             load_result = load_sharded_checkpoint(
-#                 model, resume_from_checkpoint, strict=is_sagemaker_mp_enabled(), prefer_safe=self.args.save_safetensors
-#             )
-#             if not is_sagemaker_mp_enabled():
-#                 self._issue_warnings_after_load(load_result)
-# #####
-
-
 # wpq: having `open_instruct` not found error.
 # from open_instruct.finetune import encode_with_prompt_completion_format, encode_with_messages_format
 
@@ -425,6 +208,10 @@ class ModelArguments:
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
+    use_flash_attn: bool = field(
+        default=True,
+        metadata={"help": "Whether to use flash attention in the model training"},
+    )
     cache_dir: Optional[str] = field(
         default=None,
         metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
@@ -437,17 +224,33 @@ class ModelArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
+    token: str = field(
+        default=None,
+        metadata={
+            "help": (
+                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+            )
+        },
+    )
     use_auth_token: bool = field(
+        default=None,
+        metadata={
+            "help": "The `use_auth_token` argument is deprecated and will be removed in Transformers v4.34. Please use `token`."
+        },
+    )
+    trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
+                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option"
+                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
+                "execute code present on the Hub on your local machine."
             )
         },
     )
     torch_dtype: Optional[str] = field(
-        default=None,
+        default="auto",
         metadata={
             "help": (
                 "Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed, the "
@@ -470,6 +273,15 @@ class ModelArguments:
     )
     load_in_8bit: bool = field(
         default=False,
+    )
+    low_cpu_mem_usage: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "It is an option to create the model as an empty shell, then only materialize its parameters when the pretrained weights are loaded. "
+                "set True will benefit LLM loading time and RAM consumption."
+            )
+        },
     )
 
 
@@ -563,6 +375,12 @@ def main():
         print('Finished training already. Exit now.')
         return
 
+    if model_args.use_auth_token is not None:
+        warnings.warn("The `use_auth_token` argument is deprecated and will be removed in Transformers v4.34.", FutureWarning)
+        if model_args.token is not None:
+            raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
+        model_args.token = model_args.use_auth_token
+
     # wpq: convert str to dict
     if data_args.subsample_mixture is not None:
         data_args.subsample_mixture = re.compile('(?<!\\\\)\'').sub('\"', data_args.subsample_mixture)
@@ -588,7 +406,6 @@ def main():
             json.dump(args_dict, f, indent=4)
         print(f'Saving args dict to {args_dict_path}')
 
-
     # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -610,7 +427,7 @@ def main():
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training parameters {training_args}")
 
@@ -640,7 +457,7 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
             streaming=data_args.streaming,
             download_mode=datasets.GenerateMode.FORCE_REDOWNLOAD if data_args.overwrite_cache else datasets.GenerateMode.REUSE_DATASET_IF_EXISTS,
         )
@@ -657,7 +474,6 @@ def main():
             "json",
             data_files=data_files,
             cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
             **dataset_args,
         )
         if 'ultrachat' in data_args.train_file:
@@ -667,8 +483,8 @@ def main():
     config_kwargs = {
         "cache_dir": model_args.cache_dir,
         "revision": model_args.model_revision,
-        "use_auth_token": True if model_args.use_auth_token else None,
-        "trust_remote_code": True if 'mpt' in model_args.model_name_or_path else False,
+        "token": model_args.token,
+        "trust_remote_code": model_args.trust_remote_code,
     }
     if model_args.config_name:
         config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
@@ -688,7 +504,8 @@ def main():
         "cache_dir": model_args.cache_dir,
         "use_fast": model_args.use_fast_tokenizer,
         "revision": model_args.model_revision,
-        "use_auth_token": True if model_args.use_auth_token else None,
+        "token": model_args.token,
+        "trust_remote_code": model_args.trust_remote_code,
     }
     if model_args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, **tokenizer_kwargs)
@@ -711,15 +528,15 @@ def main():
             config=config,
             cache_dir=model_args.cache_dir,
             revision=model_args.model_revision,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
             torch_dtype=torch_dtype,
-            # wpq: 8bit training
-            # load_in_8bit=model_args.load_in_8bit,
-            trust_remote_code=bool('mpt' in model_args.model_name_or_path),
+            low_cpu_mem_usage=model_args.low_cpu_mem_usage,
+            use_flash_attention_2=True if model_args.use_flash_attn else False,
         )
     else:
         logger.warning("No pretrained model_name_or_path is given. Training new model from scratch.")
-        model = AutoModelForCausalLM.from_config(config)
+        model = AutoModelForCausalLM.from_config(config, trust_remote_code=model_args.trust_remote_code)
         n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
         logger.info(f"Training new model from scratch - Total size={n_params/2**20:.2f}M params")
 
@@ -835,6 +652,9 @@ def main():
                 batched=False,
             )
         lm_datasets.set_format(type="pt")
+        # ## retain data points with at least one label not equal to -100
+        # # however, this messes up data ordering. for now just comment this out.
+        # lm_datasets = lm_datasets.filter(lambda example: (example['labels'] != -100).any())
 
     if training_args.do_train:
         if "train" not in raw_datasets:
@@ -873,7 +693,6 @@ def main():
     # here we use a custom trainer that moves the model to CPU when saving the checkpoint in FSDP mode
     # we can switch to the default trainer after moving to deepspeed (let's don't change too much for now)
     trainer = MyTrainer(
-    # trainer = SafeSaveTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,

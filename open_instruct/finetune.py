@@ -345,11 +345,6 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
 def main():
     args = parse_args()
 
-    # A hacky way to make llama work with flash attention
-    if args.use_flash_attn:
-        from llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
-        replace_llama_attn_with_flash_attn()
-
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
@@ -445,6 +440,7 @@ def main():
                 quantization_config=bnb_config,
                 device_map=device_map,
                 torch_dtype=torch.bfloat16,
+                use_flash_attention_2=True if args.use_flash_attn else False,
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
@@ -452,7 +448,7 @@ def main():
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                trust_remote_code=bool('mpt' in args.model_name_or_path),
+                use_flash_attention_2=True if args.use_flash_attn else False,
                 torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32, # wpq: during 12/12 rebase. float16 might experience instability issue. set to float32 for now.
             )
     else:
@@ -507,10 +503,6 @@ def main():
         # from peft import prepare_model_for_int8_training
         # model = prepare_model_for_int8_training(model)
         model = get_peft_model(model, peft_config)
-        # peft breaks flash attention due to casting norms to fp32. This fixes it back up.
-        # See https://github.com/huggingface/peft/issues/790
-        from llama_flash_attn_monkey_patch import upcast_layer_for_flash_attention
-        model = upcast_layer_for_flash_attention(model, torch.bfloat16)
         model.print_trainable_parameters()
 
     # wpq: print gpu utilization
