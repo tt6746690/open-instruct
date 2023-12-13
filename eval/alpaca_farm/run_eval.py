@@ -95,6 +95,8 @@ def main(args):
         output_path=args.save_dir,
         is_return_instead_of_print=True,
         caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
+        precomputed_leaderboard=None,
+        is_cache_leaderboard=False
     )
 
     prices = np.array([x['price_per_example'] for x in annotations], dtype=np.float32)
