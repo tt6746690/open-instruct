@@ -4,7 +4,6 @@ import json
 import random
 import pyarrow # wpq: added to prevent GLIBCXX not found error on aimos, put before `evaluate`, `torch`, `datasets`
 import torch
-import vllm
 import evaluate
 import numpy as np
 from transformers import GPT2LMHeadModel
@@ -103,6 +102,7 @@ def main(args):
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
         if args.use_vllm:
+            import vllm
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
