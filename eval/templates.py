@@ -61,6 +61,7 @@ def create_prompt_with_xwin_chat_format(messages, bos="<s>", eos="</s>", add_bos
         elif message["role"] == "assistant":
             formatted_text += "ASSISTANT: " + message["content"] + eos
     formatted_text += "ASSISTANT:"
+    formatted_text = bos + formatted_text if add_bos else formatted_text
     return formatted_text
 
 
@@ -68,6 +69,9 @@ def create_prompt_with_zephyr_chat_format(messages, bos="<s>", eos="</s>", add_b
     '''
     This function is adapted from the official zephyr chat completion script:
     https://huggingface.co/HuggingFaceH4/zephyr-7b-beta
+
+    wpq: specificall from
+    https://huggingface.co/HuggingFaceH4/zephyr-7b-beta/blob/main/tokenizer_config.json
     '''
     formatted_text = ""
     # if messages[0]["role"] != "system":
@@ -88,8 +92,42 @@ def create_prompt_with_zephyr_chat_format(messages, bos="<s>", eos="</s>", add_b
                 "Zephyr chat template only supports 'system', 'user' and 'assistant' roles. Invalid role: {}.".format(message["role"])
                 )
     formatted_text += "<|assistant|>\n"
+    formatted_text = bos + formatted_text if add_bos else formatted_text
     return formatted_text
 
+
+def create_prompt_with_mistral_instruct_chat_format(messages, bos="<s>", eos="</s>", add_bos=True):
+    """ adapted from https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1
+
+        Note `apply_chat_template` for this model appends bos token by default. Here we don't since we do an extra tokenization step, which adds bos token automatically.
+
+        ```
+        m = "mistralai/Mistral-7B-Instruct-v0.1"
+        tokenizer = AutoTokenizer.from_pretrained(m)
+
+        chat = [
+            {"role": "user", "content": "Hello, how are you?"},
+            {"role": "assistant", "content": "I'm doing great. How can I help you today?"},
+            {"role": "user", "content": "I'd like to show off how chat templating works!"},
+        ]
+
+        s1 = tokenizer.apply_chat_template(
+            chat, tokenize=False, add_generation_prompt=True)
+        ```
+    
+    """
+    formatted_text = ""
+    for i, message in enumerate(messages):
+        if message["role"] != ("user" if (i % 2) == 0 else "assistant"):
+            raise ValueError("Conversation roles must alternate user/assistant/user/assistant/...")
+        if message["role"] == "user":
+            formatted_text += "[INST] " + message['content'] + " [/INST]"
+        elif message["role"] == "assistant":
+            formatted_text += message['content'] + eos + " "
+        else:
+            raise ValueError("Only user and assistant roles are supported!")
+    formatted_text = bos + formatted_text if add_bos else formatted_text
+    return formatted_text
             
 
 

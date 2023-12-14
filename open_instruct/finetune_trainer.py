@@ -168,8 +168,8 @@ def encode_with_messages_format(example, tokenizer, max_seq_length):
                 messages_so_far = _concat_messages(messages[:message_idx+1])
             message_end_idx = tokenizer(
                 messages_so_far,
-                return_tensors='pt',
-                max_length=max_seq_length,
+                return_tensors='pt', 
+                max_length=max_seq_length, 
                 truncation=True
             ).input_ids.shape[1]
             labels[:, message_start_idx:message_end_idx] = -100
