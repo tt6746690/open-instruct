@@ -11,8 +11,6 @@ import torch
 from transformers import GPT2LMHeadModel
 from eval.utils import load_hf_lm_and_tokenizer, generate_completions, query_openai_chat_model, dynamic_import_function
 
-exact_match = evaluate.load("exact_match")
-
 
 def main(args):
     random.seed(42)
@@ -193,7 +191,7 @@ def main(args):
                 fout.write(json.dumps(example) + "\n")        
 
         assert len(predictions) == len(targets), "number of predictions and targets are not the same."
-        performance[task_name] = exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
+        performance[task_name] = args.exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
 
         print(f"Task {task_name} - EM: {performance[task_name]}")
 
