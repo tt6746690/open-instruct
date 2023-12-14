@@ -139,3 +139,14 @@ python scripts/split_sharegpt_conversations.py \
     --model-name-or-path results/baselines/huggyllama/llama-7b \
     --max-length 2048
 
+
+echo "Downloading the Science Instructions dataset..."
+wget -P data/raw_train/science https://beaker.org/api/v3/datasets/01HBS3G7TA8AT15C7RWTJAN66X/files/science_train.jsonl
+
+
+echo "Downloading the HardCoded dataset..."
+wget -P data/raw_train/hard_coded/ https://beaker.org/api/v3/datasets/01HBS14BBV16K45MMFSYJR86CA/files/hard_coded_examples.xlsx
+
+
+echo "Processing datasets..."
+python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/

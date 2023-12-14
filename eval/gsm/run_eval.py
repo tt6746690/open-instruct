@@ -140,7 +140,9 @@ def main(args):
                 prompts=prompts,
                 max_new_tokens=args.max_new_tokens,
                 batch_size=args.eval_batch_size,
-                stop_id_sequences=[[new_line_token]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop_id_sequences=[[new_line_token]],
+                ## wpq: this hurts baseline instruct models (e.g., mistral-7b-instruct, llama2-7b-chat). For now use stop tokens whenever possible.
+                # stop_id_sequences=[[new_line_token]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
                 do_sample=False,
             )
 
