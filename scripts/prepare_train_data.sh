@@ -140,6 +140,9 @@ python scripts/split_sharegpt_conversations.py \
     --max-length 2048
 
 
+wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/SlimOrca/resolve/main/oo-labeled_correct.gpt4.sharegpt.jsonl
+
+
 echo "Downloading the Science Instructions dataset..."
 wget -P data/raw_train/science https://beaker.org/api/v3/datasets/01HBS3G7TA8AT15C7RWTJAN66X/files/science_train.jsonl
 

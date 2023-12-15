@@ -693,33 +693,81 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000):
             }) + "\n")
 
 
-def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gpt35_examples=0):
+
+def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gpt35_examples=0, convert_extra_data=False):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_open_orca_data
+        data_dir = 'data/raw_train/open_orca'
+        output_dir = 'data/processed/open_orca'
+        convert_open_orca_data(data_dir, output_dir, convert_extra_data=True)
+        ```
+    """
     os.makedirs(output_dir, exist_ok=True)
-    examples = []
 
-    df = pd.read_parquet(os.path.join(data_dir, "1M-GPT4-Augmented.parquet"))    
-    gpt4_examples = [row.to_dict() for _, row in df.iterrows()]
-    random.shuffle(gpt4_examples)
-    examples.extend(gpt4_examples[:num_gpt4_examples])
+    if not convert_extra_data:
+        examples = []
 
-    df = pd.read_parquet(os.path.join(data_dir, "3_5M-GPT3_5-Augmented.parquet"))
-    gpt35_examples = [row.to_dict() for _, row in df.iterrows()]
-    random.shuffle(gpt35_examples)
-    examples.extend(gpt35_examples[:num_gpt35_examples])
+        df = pd.read_parquet(os.path.join(data_dir, "1M-GPT4-Augmented.parquet"))    
+        gpt4_examples = [row.to_dict() for _, row in df.iterrows()]
+        random.shuffle(gpt4_examples)
+        examples.extend(gpt4_examples[:num_gpt4_examples])
 
-    output_path = os.path.join(output_dir, "open_orca_data.jsonl")
-    with open(output_path, "w") as fout:
-        for idx, example in enumerate(examples):
-            messages = [
-                {"role": "system", "content": example["system_prompt"]},
-                {"role": "user", "content": example["question"]},
-                {"role": "assistant", "content": example["response"]}
-            ]
-            fout.write(json.dumps({
-                "dataset": "open_orca",
-                "id": f"open_orca_{example['id']}",
-                "messages": messages,
-            }) + "\n")
+        df = pd.read_parquet(os.path.join(data_dir, "3_5M-GPT3_5-Augmented.parquet"))
+        gpt35_examples = [row.to_dict() for _, row in df.iterrows()]
+        random.shuffle(gpt35_examples)
+        examples.extend(gpt35_examples[:num_gpt35_examples])
+
+        output_path = os.path.join(output_dir, "open_orca_data.jsonl")
+        with open(output_path, "w") as fout:
+            for idx, example in enumerate(examples):
+                messages = [
+                    {"role": "system", "content": example["system_prompt"]},
+                    {"role": "user", "content": example["question"]},
+                    {"role": "assistant", "content": example["response"]}
+                ]
+                fout.write(json.dumps({
+                    "dataset": "open_orca",
+                    "id": f"open_orca_{example['id']}",
+                    "messages": messages,
+                }) + "\n")
+
+    else:
+        ## wpq: open_orca_slim
+        examples = []
+        with open(os.path.join(data_dir, "oo-labeled_correct.gpt4.sharegpt.jsonl"), "r") as f:
+            for line in f:
+                examples.append(json.loads(line))
+
+        output_path = os.path.join(output_dir, "open_orca_slim_data.jsonl")
+        with open(output_path, "w") as fout:
+            for idx, example in enumerate(examples):
+                messages = []
+                for message in example["conversations"]:
+                    if message["from"] == "system":
+                        messages.append({
+                            "role": "system",
+                            "content": message["value"]
+                        })
+                    elif message["from"] == "human":
+                        messages.append({
+                            "role": "user",
+                            "content": message["value"]
+                        })
+                    elif message["from"] == "gpt":
+                        messages.append({
+                            "role": "assistant",
+                            "content": message["value"]
+                        })
+                    else:
+                        raise ValueError(f"Unknown message sender: {message['from']}")
+                if messages:
+                    fout.write(json.dumps({
+                        'dataset': 'open_orca_slim',
+                        'id': f"open_orca_slim_{idx}",
+                        'messages': messages,
+                    }) + "\n")
+
 
 
 
@@ -965,7 +1013,9 @@ if __name__ == "__main__":
             convert_sharegpt_data(
                 data_dir=os.path.join(args.raw_data_dir, "sharegpt"), 
                 output_dir=os.path.join(args.output_dir, "tulu_v2", "sharegpt_subset"),
-                data_file="sharegpt_html_cleaned_and_split_4096.json",
+                ## wpq: keep 2048! 
+                # data_file="sharegpt_html_cleaned_and_split_4096.json",
+                data_file="sharegpt_html_cleaned_and_split_2048.json",
                 num_examples=None
             )
             convert_wizardlm_data(

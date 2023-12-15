@@ -49,3 +49,4 @@ tensorboard
 faiss-gpu
 hdbscan
 -e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/DPPy
+openpyxl

@@ -85,6 +85,8 @@ def get_dataset(dataset, processed=True):
                     train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
             elif 'starcoder' in dataset:
                 train_file = os.path.join(processed_dir, 'starcoder', f'{dataset}.jsonl')
+            elif 'open_orca' in dataset:
+                train_file = os.path.join(processed_dir, 'open_orca', f'{dataset}_data.jsonl')
             else:
                 train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
         else:

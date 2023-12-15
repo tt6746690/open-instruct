@@ -485,6 +485,8 @@ def compute_lm_outputs(
         train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
     elif 'ultrachat' in dataset:
         train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
+    elif 'open_orca' in dataset:
+        train_file = os.path.join(processed_dir, 'open_orca', f'{dataset}_data.jsonl')
     elif 'starcoder' in dataset:
         train_file = os.path.join(processed_dir, 'starcoder', f'{dataset}.jsonl')
     else:
