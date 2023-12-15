@@ -846,6 +846,7 @@ if __name__ == "__main__":
     for func_name in all_funcs:
         if re.match(r"convert_.+_data", func_name):
             supported_datasets.append(func_name[8:-5])
+            
 
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument(
@@ -876,7 +877,7 @@ if __name__ == "__main__":
     # get the subfolder names in raw_data_dir
     subfolders = [f for f in os.listdir(args.raw_data_dir) if os.path.isdir(os.path.join(args.raw_data_dir, f))]
 
-    for dataset in args.dataset:
+    for dataset in args.dataset: 
         if dataset == "tulu_v1":
             print(f"Processing tulu_v1 subsets...")
             convert_flan_v2_data(
@@ -937,7 +938,7 @@ if __name__ == "__main__":
                 data_dir=os.path.join(args.raw_data_dir, "cot"), 
                 output_dir=os.path.join(args.output_dir, "tulu_v2", "cot_subset"),
                 num_few_shot_examples=25000,
-                num_zero_shot_examples=25000
+                num_zero_shot_examples=25000,
             )
             convert_oasst1_data(
                 data_dir=os.path.join(args.raw_data_dir, "oasst1"), 

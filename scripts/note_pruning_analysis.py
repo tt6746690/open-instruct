@@ -72,7 +72,9 @@ def get_dataset(dataset, processed=True):
         train_file = dataset
     else:
         if processed:
-            if 'tulu' in dataset:
+            if dataset in ['tulu_v1', 'tulu_v2']:
+                train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
+            elif 'tulu' in dataset:
                 train_file = os.path.join(processed_dir, 'tulu', f'{dataset}.jsonl')
             elif 'flan2022' in dataset:
                 train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
@@ -86,12 +88,14 @@ def get_dataset(dataset, processed=True):
             else:
                 train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
         else:
-            if dataset == 'lima':
+            if dataset in ['tulu_v1', 'tulu_v2']:
+                train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
+            elif 'tulu' in dataset:
+                train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.jsonl')
+            elif dataset == 'lima':
                 train_file = os.path.join(data_raw_dir, 'lima', 'train.jsonl')
             elif 'flan2022' in dataset:
                 train_file = os.path.join(data_raw_dir, 'flan2022', f'{dataset}.jsonl')
-            elif 'tulu' in dataset:
-                train_file = os.path.join(data_raw_dir, 'tulu', f'{dataset}.jsonl')
             elif 'starcoder' in dataset:
                 train_file = os.path.join(data_raw_dir, 'starcoder', f'{dataset}.json')
             else:

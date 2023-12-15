@@ -45,7 +45,7 @@ def split_one_sample(sample):
                 start_idx = i
             cur_len = 0
             ## wpq: just discard conversation starting from the middle, since there is no context.
-            # break for now comment out, since the data in use are created without this break
+            # break ## for now comment out, since the data in use are created without this break
         elif i == len(conversations) - 2:
             new_samples.append(make_sample(sample, start_idx, i + 2))
 
