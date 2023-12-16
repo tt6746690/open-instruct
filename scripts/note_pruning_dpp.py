@@ -46,6 +46,9 @@ def get_ifd_and_pmi(dataset, model_name):
     elif model_name.startswith('mistral-7b'):
         model_name_or_path = os.path.join(
             scripts_dir, 'results', 'baselines', 'mistralai/Mistral-7B-Instruct-v0.1')
+    elif model_name.startswith('llama2-7b'):
+        model_name_or_path = os.path.join(
+            scripts_dir, 'results', 'baselines', 'NousResearch/Llama-2-7b-hf')
     else:
         raise ValueError(f'Cannot find corresponding `model_name_or_path` for model_name: {model_name}')
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
@@ -55,7 +58,7 @@ def get_ifd_and_pmi(dataset, model_name):
         output = '\n'.join(output)
         numtoks_output = len(tokenizer(output, max_length=2048, truncation=True)['input_ids'])
         return {'numtoks_output': numtoks_output}
-    ds = ds.map(count_numtoks, num_proc=32)
+    ds = ds.map(count_numtoks, num_proc=64)
     numtoks_output = ds['numtoks_output']
     numtoks_output = np.maximum(numtoks_output, 1) # in case numtoks=0
 
@@ -516,11 +519,13 @@ def compute_dppmap(
         kernel_fn = partial(torch_linear_kernel, **kernel_kwargs)
     else:
         raise ValueError(f'kernel_type={kernel_type} not supported.')
+    
+    valid_embed_model = ['mpnet', 'bge', 'llama7b', 'llama2:7b', 'mistral7b', 'llama7b+lima']
         
-    if kernel_embed_model not in ['mpnet', 'bge', 'llama7b', 'mistral7b']:
+    if kernel_embed_model not in valid_embed_model:
         raise ValueError(f'kernel_embed_model={kernel_embed_model} not supported.')
     if theta != 0. and \
-        quality_score_embed_model not in ['mpnet', 'bge', 'llama7b', 'mistral7b', 'llama7b+lima']:
+        quality_score_embed_model not in valid_embed_model + ['llama7b+lima']:
         # if theta!=0, then we're using quality score and so need to specify model
         raise ValueError(f'quality_score_embed_model={quality_score_embed_model} not supported.')
 

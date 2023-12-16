@@ -284,7 +284,7 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
             else:
                 raise ValueError(f'Invalid deg={deg}')
             if slope <= 1:
-                gamma = gamma*10 # increase prev gamma by 10x
+                gamma = gamma*2 # increase prev gamma by 2x
             else:
                 gamma = np.max((np.poly1d(coeff)-target_size).roots)
                 gamma = np.round(gamma, 3 - int(np.floor(np.log10(abs(gamma)))) - 1) # round to 3 sig-dig
@@ -446,6 +446,15 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         log_prob = d['log_prob']
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
     elif sort_by.startswith('dppmap_'):
+        kvs = parse_kv_from_string(sort_by)
+        md = kvs['kmd']
+        if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
+            (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
+            (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
+            (md == 'llama2:7b' and not model_name.lower().startswith('llama2-7b')) or \
+            (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')) or \
+            (md == 'codellama7b' and not model_name.lower().startswith('codellama-7b')):
+            raise ValueError(f'md={md} does not match with model_name={model_name}')
         if 'gamma=auto' in sort_by:
             S, info = parse_sort_by_and_compute_dppmap_autotune_gamma(sort_by, dataset)
             if S is None and info is None:
@@ -459,6 +468,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
             (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
             (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
+            (md == 'llama2:7b' and not model_name.lower().startswith('llama2-7b')) or \
             (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')) or \
             (md == 'codellama7b' and not model_name.lower().startswith('codellama-7b')):
             raise ValueError(f'md={md} does not match with model_name={model_name}')
@@ -548,11 +558,10 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
             tokenizer = AutoTokenizer.from_pretrained('results/baselines/mistralai/Mistral-7B-v0.1', use_fast=False)
         else:
             raise ValueError('Need to supply appropriate tokenizer to count token lengths,')
-        d = get_dataset_token_lengths(dataset, tokenizer)
+        ds = get_dataset_token_lengths(dataset, tokenizer)
 
-        d['total_len'] = d['input_len'] + d['output_len']
         for k in ['input', 'output', 'total']:
-            S = d[f'{k}_len']
+            S = ds[f'numtoks_{k}']
             save_prune_results(save_dir, None, S, {}, f'{sort_by}_{k}', model_name, dataset)
 
 

@@ -487,6 +487,8 @@ def compute_lm_outputs(
         train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
     elif 'open_orca' in dataset:
         train_file = os.path.join(processed_dir, 'open_orca', f'{dataset}_data.jsonl')
+    elif 'sharegpt' in dataset:
+        train_file = os.path.join(processed_dir, 'sharegpt', f'{dataset}_data.jsonl')
     elif 'starcoder' in dataset:
         train_file = os.path.join(processed_dir, 'starcoder', f'{dataset}.jsonl')
     else:
@@ -514,7 +516,9 @@ def compute_lm_outputs(
 
 
     if rank == 0:
-        raw_datasets = load_dataset("json", data_files={'train': train_file})
+        raw_datasets = load_dataset("json", 
+                                    data_files={'train': train_file},
+                                    cache_dir=os.path.dirname(train_file))
         # if test_run:
         #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
         print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
@@ -524,7 +528,9 @@ def compute_lm_outputs(
     if use_dist:
         dist.barrier()
     if rank!= 0:
-        raw_datasets = load_dataset("json", data_files={'train': train_file})
+        raw_datasets = load_dataset("json", 
+                                    data_files={'train': train_file},
+                                    cache_dir=os.path.dirname(train_file))
         # if test_run:
         #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
         print(f"{dataset} dataset length = {len(raw_datasets['train'])}")

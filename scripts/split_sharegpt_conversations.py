@@ -124,8 +124,13 @@ def main(args):
     else:
         content = []
         for file in args.in_files:
-            with open(file, 'rb') as f:
-                content.extend(json.load(f))
+            if file.endswith('json'):
+                with open(file, 'rb') as f:
+                    content.extend(json.load(f))
+            elif file.endswith('jsonl'):
+                with open(file, 'rb') as f:
+                    for line in f:
+                        content.append(json.loads(line))
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         args.model_name_or_path,

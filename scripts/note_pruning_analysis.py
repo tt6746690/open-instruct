@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 import pickle
 from tqdm import tqdm 
+import matplotlib.pyplot as plt
 
 import pyarrow # need this before torch!
 import torch
@@ -113,12 +114,12 @@ def get_dataset(dataset, processed=True):
 
 
 def get_dataset_token_lengths(dataset, tokenizer, inds=None, num_proc=128, max_seq_length=10_000):
-    """Get token lengths for dataset.
+    """Get token lengths for dataset when `encode_with_messages_format` is used.
         Change `max_seq_length` to get an idea if any example is truncated. """
     from open_instruct.finetune_trainer import encode_with_messages_format
     if isinstance(dataset, str):
         ds = get_dataset(dataset)
-    else:
+    else: 
         ds = dataset
     if inds is not None: ds = ds.select(inds)
     encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=max_seq_length)
@@ -127,14 +128,17 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None, num_proc=128, max_s
 
     def count_token_lengths(d):
         x = d['labels']
-        input_len = x[x==-100].shape[0]
-        output_len = x.shape[0] - input_len
-        return {'input_len': input_len, 'output_len': output_len}
+        numtoks_input = x[x==-100].shape[0]
+        numtoks_output = x.shape[0] - numtoks_input
+        return {'numtoks_input': numtoks_input, 
+                'numtoks_output': numtoks_output,
+                'numtoks_total': numtoks_input + numtoks_output}
 
     ds = ds.map(count_token_lengths, num_proc=num_proc)
-    return {'input_len': ds['input_len'], 
-            'output_len': ds['output_len']}
-
+    for k in ['input_ids', 'labels', 'attention_mask']:
+        if k in ds.column_names:
+            ds = ds.remove_columns(k)
+    return ds
 
 
 def get_full_model_name(md):
@@ -144,6 +148,8 @@ def get_full_model_name(md):
         model_name = 'bge-large-en-v1.5'
     elif md == 'llama7b':
         model_name = 'llama-7b+lora:r=256:a=256'
+    elif md == 'llama2:7b':
+        model_name = 'llama2-7b+lora:r=256:a=256'
     elif md == 'codellama7b':
         model_name = 'codellama-7b+lora:r=256:a=256'
     elif md == 'mistral7b':
@@ -465,3 +471,77 @@ def save_text_viz_for_curriculum(path):
 
 
 
+
+
+def get_fast_tokenizer(model_name_or_path):
+    """get fast tokenizer that tokenize special tokens properly. """
+    from transformers import AddedToken, LlamaTokenizerFast
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path, use_fast=True)
+    num_added_tokens = tokenizer.add_special_tokens({
+        "bos_token": AddedToken("<s>", normalized=False, special=True),
+        "eos_token": AddedToken("</s>", normalized=False, special=True),
+        "unk_token": AddedToken("<unk>", normalized=False, special=True),
+        "pad_token": AddedToken("<pad>", normalized=False, special=True),
+    })
+    if isinstance(tokenizer, LlamaTokenizerFast):
+        if os.path.isdir(model_name_or_path):
+            tmp_tok_path = os.path.join(
+                os.path.dirname(model_name_or_path),
+                os.path.basename(model_name_or_path)+'_fixtok')
+            if not os.path.isdir(tmp_tok_path):
+                raise ValueError(f'Not valid fixtok path: {tmp_tok_path}')
+        else:
+            from secrets import token_hex
+            tmp_tok_path = f'/tmp/wpq_tok_{token_hex(16)}'
+            tokenizer.save_pretrained(tmp_tok_path)
+        tokenizer = AutoTokenizer.from_pretrained(tmp_tok_path, use_fast=True)
+    for s, s_tokenized in [
+        ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
+        ['▁Hi', '<s>', '▁Hey', '</s>', '▁sir', '<unk>', '▁what', '<pad>', '<pad>']),
+    ]:
+        assert(tokenizer.tokenize(s, add_special_tokens=False)==s_tokenized)
+        
+    return tokenizer
+
+
+def plt_dataset_numtoks(dataset, tokenizer_name_or_path):
+    """Plot the number of tokens in a dataset under `data/processed/`. """
+
+    # convert path -> shorter names
+    tokenizer_name = os.path.basename(tokenizer_name_or_path)
+    dataset_name = os.path.basename(dataset).split('.jsonl')[0]
+    if dataset_name.endswith('_data'):
+        dataset_name = dataset_name[:-5]
+             
+    os.makedirs(os.path.join(open_instruct_dir, 'data', 'stats', 'numtoks', tokenizer_name), exist_ok=True)
+
+    tokenizer = get_fast_tokenizer(tokenizer_name_or_path)
+    ds = get_dataset(dataset)
+    ds = get_dataset_token_lengths(ds, tokenizer, max_seq_length=100_000)
+
+    fig, axs = plt.subplots(1, 3,figsize=(12,4), sharex=True, sharey=True)
+    for axi, k in enumerate(['numtoks_input', 
+                             'numtoks_output', 
+                             'numtoks_total']):
+        ax = axs[axi]
+        ys = np.array(ds[k])
+        ax.hist(ys)
+        ax.set_title(k)
+        ax.grid()
+        for k, v in {
+            'mean': .5,
+            '99% pct': .99,
+            'max': 1,
+        }.items():
+            s = int(np.quantile(ys, v))
+            ax.axvline(x=s, color='red', linestyle='dashed', linewidth=2, label=f'{k}={s}')
+        ax.legend()
+
+    fig.suptitle(f'{dataset}:{tokenizer_name}')
+    fig.tight_layout()
+    save_path = os.path.join(open_instruct_dir, 'data', 'stats', 'numtoks', tokenizer_name, f'{dataset_name}.png')
+    fig.savefig(save_path, bbox_inches='tight', dpi=100)
+    
+    return fig, axs

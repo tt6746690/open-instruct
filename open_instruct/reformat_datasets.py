@@ -754,7 +754,7 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
 
     else:
         ## wpq: open_orca_slim
-        examples = []
+        examples = [] 
         with open(os.path.join(data_dir, "oo-labeled_correct.gpt4.sharegpt.jsonl"), "r") as f:
             for line in f:
                 examples.append(json.loads(line))
