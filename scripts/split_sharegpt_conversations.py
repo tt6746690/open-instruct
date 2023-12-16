@@ -17,7 +17,7 @@ def make_sample(sample, start_idx, end_idx):
     }
 
 
-tokenizer = max_length = None
+tokenizer = max_length = special_tok_len = None
 
 
 def split_one_sample(sample):
@@ -25,7 +25,10 @@ def split_one_sample(sample):
     conversations = sample["conversations"]
     conversations = conversations[: len(conversations) // 2 * 2]
     for c in conversations:
-        length = len(tokenizer(c["value"]).input_ids) + 6
+        length = len(tokenizer(c["value"]).input_ids) + special_tok_len
+        if special_tok_len != 6:
+            if c['from'] == 'gpt':
+                length += 1 ## wpq: take into account </s> token.
         tokenized_lens.append(length)
 
     start_idx = 0
@@ -38,7 +41,8 @@ def split_one_sample(sample):
     for i in range(0, len(conversations), 2):
         tmp_len = tokenized_lens[i] + tokenized_lens[i + 1]
         if cur_len + tmp_len > max_length:
-            new_samples.append(make_sample(sample, start_idx, i))
+            if cur_len <= max_length: ## wpq: ensure added example < max_length
+                new_samples.append(make_sample(sample, start_idx, i))
             if tmp_len > max_length:  # if the current conversation is too long, we should skip it
                 start_idx = i + 2
             else:
@@ -47,20 +51,22 @@ def split_one_sample(sample):
             ## wpq: just discard conversation starting from the middle, since there is no context.
             break ## for now comment out, since the data in use are created without this break
         elif i == len(conversations) - 2:
-            new_samples.append(make_sample(sample, start_idx, i + 2))
+            if cur_len + tmp_len <= max_length: ## wpq: ensure added example < max_length
+                new_samples.append(make_sample(sample, start_idx, i + 2))
 
         cur_len += tmp_len
 
     return new_samples
 
 
-def split_all(content, begin, end, tokenizer_, max_length_):
+def split_all(content, begin, end, tokenizer_, max_length_, special_tok_len_):
     """
     Keep the maximum round of conversations within the max token length constraint
     """
-    global tokenizer, max_length
+    global tokenizer, max_length, special_tok_len
     tokenizer = tokenizer_
     max_length = max_length_
+    special_tok_len = special_tok_len_
 
     content = content[begin:end]
     new_content = []
@@ -125,7 +131,7 @@ def main(args):
         args.model_name_or_path,
         use_fast=False,
     )
-    new_content = split_all(content, args.begin, args.end, tokenizer, args.max_length)
+    new_content = split_all(content, args.begin, args.end, tokenizer, args.max_length, args.special_tok_len)
     print(f"after split:  {len(new_content)}")
     new_content = filter_invalid_roles(new_content)
     print(f"after filter: {len(new_content)}")
@@ -150,7 +156,7 @@ def main(args):
     print('conversation lengths:')
     nconv = [len(x['conversations']) for x in content]
     print('before split: ', dict(Counter(nconv)))
-    nconv = [len(x['messages']) for x in new_content]
+    nconv = [len(x['conversations']) if 'conversations' in x else x['messages'] for x in new_content]
     print('after split: ', dict(Counter(nconv)))
 
 
@@ -162,5 +168,6 @@ if __name__ == "__main__":
     parser.add_argument("--end", type=int)
     parser.add_argument("--model-name-or-path", type=str, required=True)
     parser.add_argument("--max-length", type=int, default=4096)
+    parser.add_argument("--special_tok_len", type=int, default=6, help="the length of special tokens, e.g., <s>, \\n, <|assistant|>, <|user|>, etc.")
     args = parser.parse_args()
     main(args)

@@ -482,7 +482,27 @@ def convert_starcoder_data(data_dir, output_dir):
                 }) + "\n")
 
 
-def convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048.json", num_examples=None):
+def convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048.json", num_examples=None, dataset_name="sharegpt"):
+    """
+        python scripts/split_sharegpt_conversations.py \
+            --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
+            --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split_2048_discardlongconv.json \
+            --model-name-or-path results/baselines/huggyllama/llama-7b \
+            --max-length 2048 \
+            --special_tok_len 8
+
+        set special_tok_len to 8 as max length of both user and assistant template
+            ['_<s>', '▁<', '|', 'user', '|', '>', '<0x0A>']
+            ['<0x0A>', '▁<', '|', 'ass', 'istant', '|', '>', '<0x0A>']
+
+        ```
+        from open_instruct.reformat_datasets import convert_sharegpt_data
+        data_dir = 'data/raw_train/sharegpt'
+        output_dir = 'data/processed/sharegpt'
+        convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048_discardlongconv.json", dataset_name="sharegptv2")
+        ```
+ 
+    """
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     with open(os.path.join(data_dir, data_file), "r") as fin:
@@ -490,7 +510,7 @@ def convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned
     if num_examples:
         examples = random.sample(examples, k=num_examples)
 
-    output_path = os.path.join(output_dir, "sharegpt_data.jsonl")
+    output_path = os.path.join(output_dir, f"{dataset_name}_data.jsonl")
     with open(output_path, "w") as fout:
         invalid_cnt = 0
         for idx, example in enumerate(examples):

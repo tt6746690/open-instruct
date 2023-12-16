@@ -87,6 +87,8 @@ def get_dataset(dataset, processed=True):
                 train_file = os.path.join(processed_dir, 'starcoder', f'{dataset}.jsonl')
             elif 'open_orca' in dataset:
                 train_file = os.path.join(processed_dir, 'open_orca', f'{dataset}_data.jsonl')
+            elif 'sharegpt' in dataset:
+                train_file = os.path.join(processed_dir, 'sharegpt', f'{dataset}_data.jsonl')
             else:
                 train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
         else:
@@ -110,15 +112,17 @@ def get_dataset(dataset, processed=True):
     return ds
 
 
-def get_dataset_token_lengths(dataset, tokenizer, inds=None):
+def get_dataset_token_lengths(dataset, tokenizer, inds=None, num_proc=128, max_seq_length=10_000):
+    """Get token lengths for dataset.
+        Change `max_seq_length` to get an idea if any example is truncated. """
     from open_instruct.finetune_trainer import encode_with_messages_format
     if isinstance(dataset, str):
         ds = get_dataset(dataset)
     else:
         ds = dataset
     if inds is not None: ds = ds.select(inds)
-    encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=2048)
-    ds = ds.map(encode_fn, batched=False, num_proc=64)
+    encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=max_seq_length)
+    ds = ds.map(encode_fn, batched=False, num_proc=num_proc)
     ds.set_format(type='np')
 
     def count_token_lengths(d):
@@ -127,7 +131,7 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None):
         output_len = x.shape[0] - input_len
         return {'input_len': input_len, 'output_len': output_len}
 
-    ds = ds.map(count_token_lengths, num_proc=64)
+    ds = ds.map(count_token_lengths, num_proc=num_proc)
     return {'input_len': ds['input_len'], 
             'output_len': ds['output_len']}
 
