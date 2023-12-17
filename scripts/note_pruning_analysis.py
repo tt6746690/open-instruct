@@ -506,6 +506,43 @@ def get_fast_tokenizer(model_name_or_path):
     return tokenizer
 
 
+
+
+def filter_examples_by_numtoks(examples, tokenizer_name_or_path, num_proc=32, max_seq_length=2048):
+    ## given a list of examples, filter them so that when applied 
+    # the chat template, will be shorter than `max_seq_length`.
+    from datasets import Dataset
+
+    tokenizer = get_fast_tokenizer(tokenizer_name_or_path)
+    ds = Dataset.from_list(examples)
+
+    def convert_conversations_to_messages_fn(example):
+        messages = []
+        for x in example['conversations']:
+            if x['from'] == 'human':
+                messages.append({'role': 'user', 'content': x['value']})
+            elif x['from'] == 'gpt':
+                messages.append({'role': 'assistant', 'content': x['value']})
+            elif x['from'] == 'system':
+                pass
+            else:
+                raise ValueError(f"Unknown message sender: {x['from']}")
+        return {'messages': messages}
+    ds = ds.map(convert_conversations_to_messages_fn, num_proc=num_proc)
+    if 'conversations' in ds.column_names: ds = ds.remove_columns('conversations')
+
+    ds = get_dataset_token_lengths(ds, tokenizer, max_seq_length=10_000)
+
+    ds = ds.map(lambda x, idx: {'idx': idx}, with_indices=True, num_proc=num_proc)
+    dsf = ds.filter(lambda x: x['numtoks_total'] <= max_seq_length, num_proc=num_proc)
+
+    inds = dsf['idx']
+    examples = [examples[i] for i in inds]
+    
+    return examples
+
+
+
 def plt_dataset_numtoks(dataset, tokenizer_name_or_path):
     """Plot the number of tokens in a dataset under `data/processed/`. """
 

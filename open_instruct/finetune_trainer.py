@@ -61,6 +61,7 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from transformers.trainer_pt_utils import LengthGroupedSampler
 from transformers.trainer_utils import has_length
 from transformers.utils import is_datasets_available
+from transformers.optimization import get_scheduler
 
 class MyTrainer(Trainer):
 
@@ -85,7 +86,6 @@ class MyTrainer(Trainer):
                 lengths=lengths,
                 model_input_name=model_input_name,
             )
-
         else:
             # wpq: add option to change sampler to allow for non-shuffled ordering of data
             if self.args.dataloader_sampler == 'RandomSampler':
@@ -94,6 +94,46 @@ class MyTrainer(Trainer):
                 return SequentialSampler(self.train_dataset)
             else:
                 raise ValueError(f'{self.args.dataloader_sampler} not supported.')
+            
+    ## wpq: for debugging llama2-7b train/loss issue.
+    # def create_scheduler(self, num_training_steps: int, optimizer: torch.optim.Optimizer = None):
+    #     """
+    #     Setup the scheduler. The optimizer of the trainer must have been set up either before this method is called or
+    #     passed as an argument.
+
+    #     Args:
+    #         num_training_steps (int): The number of training steps to do.
+    #     """
+    #     if self.lr_scheduler is None:
+    #         self.lr_scheduler = get_scheduler(
+    #             self.args.lr_scheduler_type,
+    #             optimizer=self.optimizer if optimizer is None else optimizer,
+    #             num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
+    #             num_training_steps=num_training_steps,
+    #         )
+    #         self._created_lr_scheduler = True
+
+    #         print(f'create_scheduler: num_training_steps={num_training_steps}, optimizer={optimizer}')
+    #         print(f'create_scheduler: lr_scheduler={self.lr_scheduler}')
+    #         d = {
+    #             'lr_scheduler_type': self.args.lr_scheduler_type,
+    #             'optimizer': self.optimizer if optimizer is None else optimizer,
+    #             'num_warmup_steps': self.args.get_warmup_steps(num_training_steps),
+    #             'num_training_steps': num_training_steps,
+    #         }
+    #         print(f'create_scheduler kwargs = {d}')
+
+    #         s = self.lr_scheduler
+    #         lr_lambda = s.lr_lambdas[0]
+    #         print(f'create_scheduler: lr_lambda={lr_lambda}')
+
+    #         xs = list(range(num_training_steps))
+    #         ys = [lr_lambda(x) for x in xs]
+    #         print(f'create_scheduler xs:\n', xs)
+    #         print(f'create_scheduler ys:\n', ys)
+
+
+    #     return self.lr_scheduler
         
 # wpq: having `open_instruct` not found error.
 # from open_instruct.finetune import encode_with_prompt_completion_format, encode_with_messages_format
@@ -370,6 +410,7 @@ def main():
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
 
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir and os.path.isfile(os.path.join(training_args.output_dir, 'pytorch_model.bin')):
         print('Finished training already. Exit now.')
@@ -678,16 +719,18 @@ def main():
             train_dataset = train_dataset.select(inds)
 
         if data_args.subsample_inds_file is not None:
-            logger.info('Subsample dataset according to indices: {data_args.subsample_inds_file}')
+            logger.info(f'Subsample dataset according to indices: {data_args.subsample_inds_file}')
             with open(data_args.subsample_inds_file, 'rb') as f:
                 inds = pickle.load(f)['inds']
-            logger.info(f'Using subsample_inds_file: {data_args.subsample_inds_file}')
             logger.info(f'subsample_inds_file has {len(inds)} indices.')
             train_dataset = train_dataset.select(inds)
         ## 
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
+
+
+    logger.info(f"model.dtype = {model.dtype}")
 
     # initalize a trainer
     # here we use a custom trainer that moves the model to CPU when saving the checkpoint in FSDP mode

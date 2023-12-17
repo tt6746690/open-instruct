@@ -25,6 +25,8 @@ import pandas as pd
 import argparse
 from open_instruct.instruction_encode_templates import encode_instruction_example, encode_few_shot_example
 
+import sys; sys.path.append('/gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/open-instruct/scripts')
+from note_pruning_analysis import filter_examples_by_numtoks
 
 def convert_super_ni_data(data_dir, output_dir, zero_shot_examples_per_task=60, few_shot_examples_per_task=20, n_few_shot=2):
     os.makedirs(output_dir, exist_ok=True)
@@ -758,6 +760,8 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
         with open(os.path.join(data_dir, "oo-labeled_correct.gpt4.sharegpt.jsonl"), "r") as f:
             for line in f:
                 examples.append(json.loads(line))
+
+        examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
 
         output_path = os.path.join(output_dir, "open_orca_slim_data.jsonl")
         with open(output_path, "w") as fout:

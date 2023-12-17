@@ -523,7 +523,7 @@ def compute_lm_outputs(
         #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
         print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
         lm_datasets = raw_datasets.map(
-            encode_function, batched=False, num_proc=32,
+            encode_function, batched=False, num_proc=64,
             desc="Tokenizing and reformatting instruction data")
     if use_dist:
         dist.barrier()
@@ -535,7 +535,7 @@ def compute_lm_outputs(
         #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
         print(f"{dataset} dataset length = {len(raw_datasets['train'])}")
         lm_datasets = raw_datasets.map(
-            encode_function, batched=False, num_proc=16,
+            encode_function, batched=False, num_proc=64,
             desc="Tokenizing and reformatting instruction data")
 
 
