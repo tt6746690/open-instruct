@@ -760,8 +760,11 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
         with open(os.path.join(data_dir, "oo-labeled_correct.gpt4.sharegpt.jsonl"), "r") as f:
             for line in f:
                 examples.append(json.loads(line))
-
-        examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+        
+        examples = filter_examples_by_numtoks(
+            examples,
+            tokenizer_name_or_path='/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/huggyllama/llama-7b',
+            max_seq_length=2048)
 
         output_path = os.path.join(output_dir, "open_orca_slim_data.jsonl")
         with open(output_path, "w") as fout:
@@ -769,10 +772,12 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
                 messages = []
                 for message in example["conversations"]:
                     if message["from"] == "system":
-                        messages.append({
-                            "role": "system",
-                            "content": message["value"]
-                        })
+                        ## wpq: for now don't include system prompt
+                        # messages.append({
+                        #     "role": "system",
+                        #     "content": message["value"] 
+                        # })
+                        pass
                     elif message["from"] == "human":
                         messages.append({
                             "role": "user",

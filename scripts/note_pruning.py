@@ -226,7 +226,7 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
 def parse_sort_by_and_compute_dppmap_autotune_gamma(
         sort_by,
         dataset,
-        rel_tol=0.01,
+        rel_tol=0.008,
         max_iterations=20,
     ):
     """run dppmap, but auto-tunes `gamma` to reach target_size. """

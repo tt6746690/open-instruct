@@ -516,6 +516,8 @@ def filter_examples_by_numtoks(examples, tokenizer_name_or_path, num_proc=32, ma
     tokenizer = get_fast_tokenizer(tokenizer_name_or_path)
     ds = Dataset.from_list(examples)
 
+    num_examples = len(ds)
+
     def convert_conversations_to_messages_fn(example):
         messages = []
         for x in example['conversations']:
@@ -538,6 +540,8 @@ def filter_examples_by_numtoks(examples, tokenizer_name_or_path, num_proc=32, ma
 
     inds = dsf['idx']
     examples = [examples[i] for i in inds]
+
+    print(f'[filter_examples_by_numtoks] Filter to <={max_seq_length}, the number of examples {num_examples} -> {len(examples)} examples')
     
     return examples
 
