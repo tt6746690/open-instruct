@@ -26,7 +26,7 @@ import argparse
 from open_instruct.instruction_encode_templates import encode_instruction_example, encode_few_shot_example
 
 import sys; sys.path.append('/gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/open-instruct/scripts')
-from note_pruning_analysis import filter_examples_by_numtoks
+from note_pruning_analysis import filter_examples_by_numtoks, filter_json_by_numtoks
 
 def convert_super_ni_data(data_dir, output_dir, zero_shot_examples_per_task=60, few_shot_examples_per_task=20, n_few_shot=2):
     os.makedirs(output_dir, exist_ok=True)
@@ -744,7 +744,8 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
         with open(output_path, "w") as fout:
             for idx, example in enumerate(examples):
                 messages = [
-                    {"role": "system", "content": example["system_prompt"]},
+                    ## wpq: for now don't include system prompt
+                    # {"role": "system", "content": example["system_prompt"]},
                     {"role": "user", "content": example["question"]},
                     {"role": "assistant", "content": example["response"]}
                 ]
@@ -916,6 +917,8 @@ def should_be_filtered(example):
     return False
         
 
+
+
 if __name__ == "__main__":
     # all supported datasets    
     supported_datasets = []
@@ -1042,9 +1045,9 @@ if __name__ == "__main__":
             convert_sharegpt_data(
                 data_dir=os.path.join(args.raw_data_dir, "sharegpt"), 
                 output_dir=os.path.join(args.output_dir, "tulu_v2", "sharegpt_subset"),
-                ## wpq: keep 2048! 
+                ## wpq: use 2048 version and strictly enforce this.
                 # data_file="sharegpt_html_cleaned_and_split_4096.json",
-                data_file="sharegpt_html_cleaned_and_split_2048.json",
+                data_file="sharegpt_html_cleaned_and_split_2048_discardlongconv.json",
                 num_examples=None
             )
             convert_wizardlm_data(
@@ -1082,6 +1085,16 @@ if __name__ == "__main__":
                                 fout_filtered.write(line)
                             else:
                                 fout.write(line)
-        else:
+            """
+            python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/ --dataset tulu_v2
+            """
+            ## wpq: to avoid truncate examples during training.
+            print("Filtering tulu_v2 to max_seq_length=2048...")
+            filepath = os.path.join(args.output_dir, "tulu_v2", "tulu_v2_data.jsonl")
+            filter_json_by_numtoks(filepath, max_seq_length=2048)
+        else: 
             print(f"Processing {dataset} data with default configurations...")
             globals()[f"convert_{dataset}_data"](os.path.join(args.raw_data_dir, dataset), os.path.join(args.output_dir, dataset))
+
+
+            

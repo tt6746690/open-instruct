@@ -518,20 +518,22 @@ def filter_examples_by_numtoks(examples, tokenizer_name_or_path, num_proc=32, ma
 
     num_examples = len(ds)
 
-    def convert_conversations_to_messages_fn(example):
-        messages = []
-        for x in example['conversations']:
-            if x['from'] == 'human':
-                messages.append({'role': 'user', 'content': x['value']})
-            elif x['from'] == 'gpt':
-                messages.append({'role': 'assistant', 'content': x['value']})
-            elif x['from'] == 'system':
-                pass
-            else:
-                raise ValueError(f"Unknown message sender: {x['from']}")
-        return {'messages': messages}
-    ds = ds.map(convert_conversations_to_messages_fn, num_proc=num_proc)
-    if 'conversations' in ds.column_names: ds = ds.remove_columns('conversations')
+    if 'messages' not in ds.column_names and 'conversations' in ds.column_names:
+        def convert_conversations_to_messages_fn(example):
+            messages = []
+            for x in example['conversations']:
+                if x['from'] == 'human':
+                    messages.append({'role': 'user', 'content': x['value']})
+                elif x['from'] == 'gpt':
+                    messages.append({'role': 'assistant', 'content': x['value']})
+                elif x['from'] == 'system':
+                    pass
+                else:
+                    raise ValueError(f"Unknown message sender: {x['from']}")
+            return {'messages': messages}
+        ds = ds.map(convert_conversations_to_messages_fn, num_proc=num_proc)
+        if 'conversations' in ds.column_names:
+            ds = ds.remove_columns('conversations')
 
     ds = get_dataset_token_lengths(ds, tokenizer, max_seq_length=10_000)
 
@@ -545,6 +547,26 @@ def filter_examples_by_numtoks(examples, tokenizer_name_or_path, num_proc=32, ma
     
     return examples
 
+
+def filter_json_by_numtoks(jsonl_path, max_seq_length=2048):
+    """Filter dataset specified by `jsonl_path`,
+        so that each example when applied tulu's chat template has numtoks < `max_seq_length`.
+        Write the dataset to `jsonl_path`. """
+
+    examples = []
+    with open(jsonl_path, "r") as f:
+        for line in f:
+            examples.append(json.loads(line))
+
+    examples = filter_examples_by_numtoks(
+        examples,
+        tokenizer_name_or_path='/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/huggyllama/llama-7b',
+        max_seq_length=max_seq_length,
+        num_proc=64)
+
+    with open(jsonl_path, 'w') as f:
+        for example in examples:
+            f.write(json.dumps(example) + '\n')
 
 
 def plt_dataset_numtoks(dataset, tokenizer_name_or_path):

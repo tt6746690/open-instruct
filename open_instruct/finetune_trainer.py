@@ -514,7 +514,7 @@ def main():
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
-            cache_dir=model_args.cache_dir,
+            cache_dir=model_args.cache_dir if model_args.cache_dir else os.path.dirname(data_files['train']),
             **dataset_args,
         )
         if 'ultrachat' in data_args.train_file:
@@ -729,8 +729,6 @@ def main():
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
 
-
-    logger.info(f"model.dtype = {model.dtype}")
 
     # initalize a trainer
     # here we use a custom trainer that moves the model to CPU when saving the checkpoint in FSDP mode
