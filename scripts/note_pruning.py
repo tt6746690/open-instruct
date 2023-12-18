@@ -288,7 +288,7 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
             else:
                 gamma = np.max((np.poly1d(coeff)-target_size).roots)
                 gamma = np.round(gamma, 3 - int(np.floor(np.log10(abs(gamma)))) - 1) # round to 3 sig-dig
-                gamma = max(min(1., gamma), 1e-8)
+                gamma= max(min(1., gamma), 1e-8)
         else:
             if len(df) > 0:
                 gamma = 2*gamma if target_size > M_closest else .5*gamma

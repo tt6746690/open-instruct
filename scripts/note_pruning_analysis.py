@@ -608,3 +608,62 @@ def plt_dataset_numtoks(dataset, tokenizer_name_or_path):
     fig.savefig(save_path, bbox_inches='tight', dpi=100)
     
     return fig, axs
+
+
+def count_repeating_substrings(s, min_length=1, max_length=5):
+    substring_counts = {}
+
+    def count_substrings(s, length):
+        counts = {}
+        for i in range(len(s) - length + 1):
+            substring = s[i:i+length]
+            counts[substring] = counts.get(substring, 0) + 1
+        return counts
+
+    for length in range(min_length, max_length + 1):
+        counts = count_substrings(s, length)
+        for substring, count in counts.items():
+            if count > 1:
+                substring_counts[substring] = count
+
+    return substring_counts
+
+
+def update_metrics_with_highly_repeated_chars(save_dir):
+    """Update `metrics.json` in alpacaeval with percentage counts of highly repeated generations."""
+    from datasets import Dataset
+
+    ann_file = os.path.join(save_dir, 'annotations.json')
+    metrics_file = os.path.join(save_dir, 'metrics.json')
+
+    if not os.path.isfile(metrics_file) or not os.path.isfile(metrics_file):
+        return
+
+    with open(ann_file, 'r') as f:
+        data = json.load(f)
+    df = pd.DataFrame(data)
+    ds = Dataset.from_pandas(df)
+
+    def count_repeat_substrings_fn(example):
+        output = {}
+        for k in ['output_1', 'output_2']:
+            d = count_repeating_substrings(example[k], min_length=3, max_length=3)
+            output[f'{k}_repchar'] = str(d)
+            output[f'{k}_maxrepchar'] = max(list(d.values())) if d else 0
+        return output
+
+    ds = ds.map(count_repeat_substrings_fn, num_proc=64)
+    ds = ds.map(lambda x: {'output_1_highlyrepeated': float(x['output_1_maxrepchar'] >= 40)})
+    ds = ds.map(lambda x: {'output_2_highlyrepeated': float(x['output_2_maxrepchar'] >= 40)})
+
+    d = {
+        'output_1_highlyrepeated': np.sum(ds['output_1_highlyrepeated'])/len(ds) * 100,
+        'output_2_highlyrepeated': np.sum(ds['output_2_highlyrepeated'])/len(ds) * 100,
+    }
+
+    with open(metrics_file, 'r') as f:
+        metrics = json.load(f)
+
+    metrics.update(d)
+    with open(metrics_file, 'w') as f:
+        json.dump(metrics, f)
