@@ -652,6 +652,7 @@ def update_metrics_with_highly_repeated_chars(
             
         ```
         save_dirs = glob.glob('results/*/*/eval/alpacafarm*/')
+        save_dirs = glob.glob('results/baselines/*/*/eval/alpacafarm*/')
         from tqdm import tqdm
         for save_dir in tqdm(save_dirs):
             print(save_dir)
@@ -669,7 +670,7 @@ def update_metrics_with_highly_repeated_chars(
     metrics_file = os.path.join(save_dir, 'metrics.json')
 
     if not os.path.isfile(metrics_file) or not os.path.isfile(metrics_file):
-        return
+        return None, None
 
     with open(ann_file, 'r') as f:
         data = json.load(f)
@@ -685,7 +686,7 @@ def update_metrics_with_highly_repeated_chars(
             output[f'{k}_maxrepchar'] = max(list(d.values())) if d else 0
             
         # Always set base model win if following holds
-        #     - base model not highly repetitive  
+        #     - base model not repetitive  
         #     - evaluated model highly repetitive 
         output_1_highlyrepeated = output['output_1_maxrepchar'] >= num_repeated_substr_threshold
         output_2_highlyrepeated = output['output_2_maxrepchar'] >= num_repeated_substr_threshold

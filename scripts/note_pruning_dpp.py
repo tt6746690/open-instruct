@@ -506,7 +506,21 @@ def compute_dppmap(
     device,
     run_name,
     Y=None, # cluster assignments
-):
+):  
+    """
+        Memory usage:
+        ```
+        gpu_mem_fn = lambda N, D: N*(D+1)*4/(1024**3)
+        cpu_mem_fn = lambda N, M, D: N*(M+1)*4/(1024**3)
+        for N, M, D in [
+            (100_000,  10_000, 4096),
+            (1500_000, 10_000, 4096),
+            (1500_000, 20_000, 4096),
+        ]:
+            print(f'[D={D}, {N:7} ->{M:6}]\t'
+                f'gpu_mem = {gpu_mem_fn(N, D):5.2f}GB\tcpu_mem = {cpu_mem_fn(N, M, D):5.2f}GB')
+        ```
+    """
     
     if dppmap_type not in ['dppmap', 'dppmapbd']:
         raise ValueError(f'dppmap_type={dppmap_type} not supported.')
@@ -641,6 +655,12 @@ def compute_dppmap(
     for i, ind in enumerate(inds):
         S[ind] = i
 
+    ## release gpu memory manually to avoid repeated call to this function giving oom
+    if device == 'cuda':
+        del X
+        del Q
+        if Y is not None: del Y
+        torch.cuda.empty_cache()
 
     return S, info
 

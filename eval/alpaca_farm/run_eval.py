@@ -117,6 +117,13 @@ def main(args):
     with open(os.path.join(args.save_dir, f"metrics.json"), "w") as fout:
         json.dump(df_leaderboard.iloc[0].to_dict(), fout)
 
+    ## wpq: update `metrics.json` with repetitiveness adjusted win_rate.
+    try:
+        from scripts.note_pruning_analysis import update_metrics_with_highly_repeated_chars
+        update_metrics_with_highly_repeated_chars(args.save_dir, update_metrics_file=True)
+    except:
+        print('Running `update_metrics_with_highly_repeated_chars` failed.')
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

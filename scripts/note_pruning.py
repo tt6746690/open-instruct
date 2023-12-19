@@ -203,6 +203,12 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
         kernel_kwargs = {'gamma': kvs.get('gamma', 1.)}
     else:
         kernel_kwargs = {}
+
+    if dataset != 'ultrachat15':
+        max_length = 55_000
+    else:
+        max_length = 20_000
+
     kwargs = {
         'dppmap_type': 'dppmap',
         'dataset': dataset,
@@ -214,7 +220,7 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
         'quality_score_embed_model': kvs.get('qmd', None),
         'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
         'device': 'cuda',
-        'max_length': 55_000, # balance finish job within 6 hrs with wanting to prune a lot. meaning resulting scores will only be valid up to 20k for large datasets.
+        'max_length': max_length, # balance finish job within 6 hrs with wanting to prune a lot. meaning resulting scores will only be valid up to 20k for large datasets.
         'run_name': sort_by,
     }
     print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
