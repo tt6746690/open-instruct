@@ -610,7 +610,7 @@ def plt_dataset_numtoks(dataset, tokenizer_name_or_path):
     return fig, axs
 
 
-def count_repeating_substrings(s, min_length=1, max_length=5):
+def count_repeating_substrings(s, length=3):
     substring_counts = {}
 
     def count_substrings(s, length):
@@ -620,17 +620,49 @@ def count_repeating_substrings(s, min_length=1, max_length=5):
             counts[substring] = counts.get(substring, 0) + 1
         return counts
 
-    for length in range(min_length, max_length + 1):
-        counts = count_substrings(s, length)
-        for substring, count in counts.items():
-            if count > 1:
-                substring_counts[substring] = count
+    counts = count_substrings(s, length)
+    for substring, count in counts.items():
+        if count > 1:
+            substring_counts[substring] = count
+
+    substring_counts = sorted(substring_counts.items(), key=lambda x: x[1], reverse=True)
+    substring_counts = {k: v for k, v in substring_counts}
 
     return substring_counts
 
 
-def update_metrics_with_highly_repeated_chars(save_dir):
-    """Update `metrics.json` in alpacaeval with percentage counts of highly repeated generations."""
+def compute_win_rate(preference):
+    preference = np.array([x for x in preference if x is not None])
+    n_wins = np.sum(preference == 2.)
+    n_wins_base = np.sum(preference == 1.)
+    n_draws = np.sum(preference == 0.)
+    n_total = n_wins + n_wins_base + n_draws
+    win_rate = (n_wins/n_total + .5*n_draws/n_total)
+    return win_rate
+
+
+def update_metrics_with_highly_repeated_chars(
+        save_dir,
+        num_repeated_substr_threshold=100,
+        repeated_str_len=3, 
+        update_metrics_file=False):
+    """Update `metrics.json` in alpacaeval with 
+            - percentage counts of highly repeated generations.
+            - win-rate adjusted for repetitive outputs (always give base model a win). 
+            
+        ```
+        save_dirs = glob.glob('results/*/*/eval/alpacafarm*/')
+        from tqdm import tqdm
+        for save_dir in tqdm(save_dirs):
+            print(save_dir)
+            ds, d = update_metrics_with_highly_repeated_chars(
+                save_dir,
+                num_repeated_substr_threshold=100,
+                repeated_str_len=3,
+                update_metrics_file=True)
+        ```
+            
+    """
     from datasets import Dataset
 
     ann_file = os.path.join(save_dir, 'annotations.json')
@@ -644,26 +676,39 @@ def update_metrics_with_highly_repeated_chars(save_dir):
     df = pd.DataFrame(data)
     ds = Dataset.from_pandas(df)
 
-    def count_repeat_substrings_fn(example):
+    def compute_preference_adjust_by_repetitiveness(example):
         output = {}
         for k in ['output_1', 'output_2']:
-            d = count_repeating_substrings(example[k], min_length=3, max_length=3)
+            d = count_repeating_substrings(example[k], length=repeated_str_len)
+            if ' '*repeated_str_len in d: del d[' '*repeated_str_len] # skip white space for coding
             output[f'{k}_repchar'] = str(d)
             output[f'{k}_maxrepchar'] = max(list(d.values())) if d else 0
+            
+        # Always set base model win if following holds
+        #     - base model not highly repetitive  
+        #     - evaluated model highly repetitive 
+        output_1_highlyrepeated = output['output_1_maxrepchar'] >= num_repeated_substr_threshold
+        output_2_highlyrepeated = output['output_2_maxrepchar'] >= num_repeated_substr_threshold
+        preference = example['preference']
+        if not output_1_highlyrepeated and output_2_highlyrepeated:
+            preference = 1.
+        output.update({'preference_repetition_adjusted': preference,
+                       'output_1_highlyrepeated': float(output_1_highlyrepeated),
+                       'output_2_highlyrepeated': float(output_2_highlyrepeated),})
         return output
-
-    ds = ds.map(count_repeat_substrings_fn, num_proc=64)
-    ds = ds.map(lambda x: {'output_1_highlyrepeated': float(x['output_1_maxrepchar'] >= 40)})
-    ds = ds.map(lambda x: {'output_2_highlyrepeated': float(x['output_2_maxrepchar'] >= 40)})
+    ds = ds.map(compute_preference_adjust_by_repetitiveness, num_proc=1)
 
     d = {
         'output_1_highlyrepeated': np.sum(ds['output_1_highlyrepeated'])/len(ds) * 100,
         'output_2_highlyrepeated': np.sum(ds['output_2_highlyrepeated'])/len(ds) * 100,
+        'win_rate_repetition_adjusted': compute_win_rate(ds['preference_repetition_adjusted']) * 100,
     }
-
-    with open(metrics_file, 'r') as f:
-        metrics = json.load(f)
-
-    metrics.update(d)
-    with open(metrics_file, 'w') as f:
-        json.dump(metrics, f)
+    
+    if update_metrics_file:
+        with open(metrics_file, 'r') as f:
+            metrics = json.load(f)
+        metrics.update(d)
+        with open(metrics_file, 'w') as f:
+            json.dump(metrics, f)
+            
+    return ds, d
