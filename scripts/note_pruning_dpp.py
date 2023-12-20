@@ -761,7 +761,7 @@ def plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_lengt
 
 
 
-def plt_subset_size_vs_kernel_params(dataset):
+def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None):
     """Plot how subse size varies with kernel hyperparameters.
         ```
         from note_pruning_dpp import plt_subset_size_vs_kernel_params
@@ -771,28 +771,35 @@ def plt_subset_size_vs_kernel_params(dataset):
 
     df = get_dppmap_run_info('dppmap_*', dataset)
     df = df[df.max_length > df.M]
+    if filter_fn is not None:
+        df = df[df.apply(filter_fn, axis=1)]
     df = df.reset_index(drop=True)
 
     info = df.groupby('sort_by').apply(lambda g: g[['gamma', 'M', 'time_elapsed']].to_dict(orient='list')).to_dict()
 
     nrows = len(info) + 2
 
-    fig, axs = plt.subplots(nrows, 1, figsize=(8,4*nrows))
+    fig, axs = plt.subplots(nrows, 1, figsize=(12,4*nrows))
 
     ax = axs[0]
+    for y in [1_000, 2_000, 10_000]:
+        ax.axhline(y=y, color='gray', linestyle='--')
     for i, (sort_by, d) in enumerate(info.items()):
-        ax.plot(d['gamma'], d['M'], 'o', label=sort_by)
-    ax.set_ylabel('subset size')
-    ax.set_xlabel('gamma')
+        ax.plot(d['gamma'], d['M'], 'o-', label=sort_by)
+    ax.set_ylabel('subset size or rank(L) (larger -> less redundant)')
+    ax.set_xlabel(r'$\sqrt{\gamma}$ (larger -> repulsive effect more local)')
+    ax.set_xscale('function', functions=(lambda x: x**0.5, lambda x: x**2))
+    ax.set_xlim(left=np.finfo(float).eps)
     ax.legend(fontsize=8)
 
     ax = axs[1]
     for i, (sort_by, d) in enumerate(info.items()):
-        ax.plot(d['gamma'], np.array(d['time_elapsed'])/60./60., label=sort_by)
-    ax.set_ylabel('Time (hrs)')
-    ax.set_xlabel('gamma')
+        ax.plot(d['gamma'], d['M'], 'o-', label=sort_by)
+    ax.set_ylabel('subset size')
+    ax.set_xlabel(r'$\gamma$')
+    # ax.set_yscale('log')
+    ax.set_xlim(left=0)
     ax.legend(fontsize=8)
-
 
     for i, (sort_by, d) in enumerate(info.items()):
         ax = axs[i+2]
@@ -815,11 +822,15 @@ def plt_subset_size_vs_kernel_params(dataset):
         ax.set_xlabel('gamma')
         ax.legend()
 
-
+    fig.suptitle(dataset)
     fig.tight_layout()
-    save_path = os.path.join(scripts_dir, 'dpp', dataset, f'fig_dppmap_subset_size_vs_kernel_params.png')
-    fig.savefig(save_path, bbox_inches='tight', dpi=100)
-    plt.close()
+
+    if save_fig:
+        save_path = os.path.join(scripts_dir, 'dpp', dataset, f'fig_dppmap_subset_size_vs_kernel_params.png')
+        fig.savefig(save_path, bbox_inches='tight', dpi=100)
+        plt.close()
+
+    return fig, axs
     
 
 

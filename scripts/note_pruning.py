@@ -228,11 +228,10 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
 
 
 
-
 def parse_sort_by_and_compute_dppmap_autotune_gamma(
         sort_by,
         dataset,
-        rel_tol=0.008,
+        rel_tol=0.01,
         max_iterations=20,
     ):
     """run dppmap, but auto-tunes `gamma` to reach target_size. """
@@ -276,13 +275,20 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
             # Fit quadratic fn: M = quadratic_fn(gamma)
             # give more weight to closeby gamma & M
             deg = 1
-            coeff = np.polyfit(
-                d['gamma'],
-                d['M'],
-                deg=deg,
-                w=1/np.abs(target_size-np.array(d['M'])),
-            )
-            print(f'[autotune gamma] Fit quadratic fn: M = quad_fn(γ), coeff={coeff}')
+            xs, ys = np.array(d['gamma']), np.array(d['M'])
+            w = 1/np.abs(target_size-ys)
+
+            # switch to bisection if target_size is inbetween two previously found subset sizes.
+            # to prevent estimated function being affected by many points somewhat close to `target_size`
+            inbetween = np.any(ys > target_size) and np.any(ys < target_size)
+            if inbetween:
+                c = np.zeros_like(ys)
+                c[np.argmin(np.array([np.inf if y < target_size else y-target_size for y in ys]))] = 1
+                c[np.argmin(np.array([np.inf if y > target_size else target_size-y for y in ys]))] = 1
+                w = w*c
+            coeff = np.polyfit(xs, ys, deg=deg, w=w)
+            print(f'[autotune gamma] Fit fn given data:\n gamma={d["gamma"]}\nM={d["M"]}')
+            print(f'[autotune gamma] Fit fn: M = quad_fn(γ), coeff={coeff}')
             if deg == 1:
                 slope = coeff[0]
             elif deg == 2:
@@ -294,6 +300,7 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
             else:
                 gamma = np.max((np.poly1d(coeff)-target_size).roots)
                 gamma = np.round(gamma, 3 - int(np.floor(np.log10(abs(gamma)))) - 1) # round to 3 sig-dig
+                print(gamma)
                 gamma= max(min(1., gamma), 1e-8)
         else:
             if len(df) > 0:
