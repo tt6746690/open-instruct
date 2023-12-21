@@ -766,6 +766,12 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None):
         ```
         from note_pruning_dpp import plt_subset_size_vs_kernel_params
         plt_subset_size_vs_kernel_params('wizardlm')
+
+        dataset = 'sharegptv2'
+        filter_fn = lambda row: 'llama2' not in row['sort_by'] and row['M'] < 20_000
+        dataset = 'wizardlm'
+        filter_fn = lambda row: 'theta' not in row['sort_by'] and row['M'] < 20_000
+        fig, axs = plt_subset_size_vs_kernel_params(dataset, save_fig=False, filter_fn=filter_fn)
         ```
     """
 
