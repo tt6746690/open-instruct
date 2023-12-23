@@ -445,8 +445,8 @@ def convert_starcoder_data(data_dir, output_dir):
         # 'commentinstrv2_flppl.json',
         # 'commentinstrv2.json',
         # 'commentinstrv3.json',
-        'commentinstrv4.json',
-        'commentinstrv4_rge5.json',
+        # 'commentinstrv4.json',
+        # 'commentinstrv4_rge5.json',
     ]
     # only keep cleaned data
     filenames = [clean_starcoder_data(data_dir, filename) for filename in filenames]
@@ -1096,5 +1096,14 @@ if __name__ == "__main__":
             print(f"Processing {dataset} data with default configurations...")
             globals()[f"convert_{dataset}_data"](os.path.join(args.raw_data_dir, dataset), os.path.join(args.output_dir, dataset))
 
-
+            ## wpq: to avoid truncate examples during training.
+            print(f"Filtering {dataset} to max_seq_length=2048...")
+            filepath = os.path.join(args.output_dir, dataset, f"{dataset}_data.jsonl")
+            if os.path.exists(filepath):
+                filter_json_by_numtoks(filepath, max_seq_length=2048)
+            else:
+                print(f"Warning: {filepath} does not exist. Skipping...")
             
+            """
+            python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/ --dataset oasst1
+            """

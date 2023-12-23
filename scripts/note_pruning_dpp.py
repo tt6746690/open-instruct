@@ -761,21 +761,49 @@ def plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_lengt
 
 
 
-def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None):
+def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sort_by='dppmap_*', hlines=[1_000, 2_000, 10_000]):
     """Plot how subse size varies with kernel hyperparameters.
         ```
         from note_pruning_dpp import plt_subset_size_vs_kernel_params
-        plt_subset_size_vs_kernel_params('wizardlm')
-
         dataset = 'sharegptv2'
         filter_fn = lambda row: 'llama2' not in row['sort_by'] and row['M'] < 20_000
         dataset = 'wizardlm'
         filter_fn = lambda row: 'theta' not in row['sort_by'] and row['M'] < 20_000
         fig, axs = plt_subset_size_vs_kernel_params(dataset, save_fig=False, filter_fn=filter_fn)
+
+        ## cross-dataset comparison
+        datasets = [
+            'stanford_alpaca', 
+            'sharegptv2',
+            'wizardlm',
+            'tulu_v2',
+            'open_orca_slim',
+        ]
+        M = 1200; hlines = [1_000]
+        M = 50_000; hlines = [1_000, 2_000, 10_000]
+        sort_by='dppmap_k=rbf*kemb=text+embedding'
+        sort_by='dppmap_*mpnet*'
+        sort_by = 'dppmap_k=vmf*kemb=grad+rp+loraB'
+        fig, axs = plt_subset_size_vs_kernel_params(
+            datasets, 
+            save_fig=False, 
+            filter_fn=lambda row: row['M'] <M and 'theta' not in row['sort_by'] \
+                and 'llama2' not in row['sort_by'],
+            hlines=hlines,
+            sort_by=sort_by,
+        )
         ```
     """
-
-    df = get_dppmap_run_info('dppmap_*', dataset)
+    if isinstance(dataset, list):
+        df_list = []
+        for x in dataset:
+            df = get_dppmap_run_info(sort_by, x)
+            df['sort_by'] = df.apply(lambda row: f"{x}:{row['sort_by']}", axis=1)
+            df_list.append(df)
+        df = pd.concat(df_list, axis=0)
+        dataset = ';'.join([x[:3] for x in dataset])
+    else:
+        df = get_dppmap_run_info(sort_by, dataset)
     df = df[df.max_length > df.M]
     if filter_fn is not None:
         df = df[df.apply(filter_fn, axis=1)]
@@ -788,7 +816,7 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None):
     fig, axs = plt.subplots(nrows, 1, figsize=(12,4*nrows))
 
     ax = axs[0]
-    for y in [1_000, 2_000, 10_000]:
+    for y in hlines:
         ax.axhline(y=y, color='gray', linestyle='--')
     for i, (sort_by, d) in enumerate(info.items()):
         ax.plot(d['gamma'], d['M'], 'o-', label=sort_by)
@@ -830,6 +858,7 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None):
 
     fig.suptitle(dataset)
     fig.tight_layout()
+
 
     if save_fig:
         save_path = os.path.join(scripts_dir, 'dpp', dataset, f'fig_dppmap_subset_size_vs_kernel_params.png')
