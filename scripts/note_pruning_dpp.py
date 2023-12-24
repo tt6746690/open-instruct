@@ -761,7 +761,7 @@ def plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_lengt
 
 
 
-def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sort_by='dppmap_*', hlines=[1_000, 2_000, 10_000]):
+def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sort_by='dppmap_*', hlines=[1_000, 2_000, 10_000], normalize_by_dataset_size=False, interpolate=True):
     """Plot how subse size varies with kernel hyperparameters.
         ```
         from note_pruning_dpp import plt_subset_size_vs_kernel_params
@@ -794,16 +794,36 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sor
         )
         ```
     """
+    from scipy.interpolate import UnivariateSpline
+
+
+    dataset_sizes = {
+        'dolly':  14_956,
+        'flan_v2': 99_284,
+        'oasst1': 33_717,
+        'open_orca_slim': 512_258,
+        'sharegptv2': 74_242,
+        'stanford_alpaca': 52_002,
+        'tulu_v2':  283_434,
+        'wizardlm': 143_000,
+    }
+
     if isinstance(dataset, list):
         df_list = []
         for x in dataset:
             df = get_dppmap_run_info(sort_by, x)
             df['sort_by'] = df.apply(lambda row: f"{x}:{row['sort_by']}", axis=1)
+            if normalize_by_dataset_size:
+                N = dataset_sizes[x]
+                df['M'] = df['M']/N
             df_list.append(df)
         df = pd.concat(df_list, axis=0)
-        dataset = ';'.join([x[:3] for x in dataset])
+        dataset = ''
     else:
         df = get_dppmap_run_info(sort_by, dataset)
+        if normalize_by_dataset_size:
+            N = dataset_sizes[dataset]
+            df['M'] = df['M']/N
     df = df[df.max_length > df.M]
     if filter_fn is not None:
         df = df[df.apply(filter_fn, axis=1)]
@@ -818,8 +838,19 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sor
     ax = axs[0]
     for y in hlines:
         ax.axhline(y=y, color='gray', linestyle='--')
-    for i, (sort_by, d) in enumerate(info.items()):
-        ax.plot(d['gamma'], d['M'], 'o-', label=sort_by)
+    for i, (sort_by, d) in enumerate(sorted(info.items())):
+        color = plt.get_cmap('tab10')(i)
+        xs = np.array(d['gamma'])
+        ys = np.array(d['M'])
+        ax.scatter(xs, ys, s=60, marker='o', facecolors='none', linewidths=2, label=sort_by, color=color)
+        if len(xs) < 2: continue
+        if interpolate:
+            # spl = UnivariateSpline(xs, ys, k=1, s=20)
+            # gamma_smooth = np.linspace(xs.min(), xs.max(), 300)
+            # M_smooth = spl(gamma_smooth)
+            # ax.plot(gamma_smooth, M_smooth, color=color)
+            ax.plot(xs, ys, '--', color=color)
+
     ax.set_ylabel('subset size or rank(L) (larger -> less redundant)')
     ax.set_xlabel(r'$\sqrt{\gamma}$ (larger -> repulsive effect more local)')
     ax.set_xscale('function', functions=(lambda x: x**0.5, lambda x: x**2))
@@ -827,7 +858,7 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sor
     ax.legend(fontsize=8)
 
     ax = axs[1]
-    for i, (sort_by, d) in enumerate(info.items()):
+    for i, (sort_by, d) in enumerate(sorted(info.items())):
         ax.plot(d['gamma'], d['M'], 'o-', label=sort_by)
     ax.set_ylabel('subset size')
     ax.set_xlabel(r'$\gamma$')
@@ -835,7 +866,7 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sor
     ax.set_xlim(left=0)
     ax.legend(fontsize=8)
 
-    for i, (sort_by, d) in enumerate(info.items()):
+    for i, (sort_by, d) in enumerate(sorted(info.items())):
         ax = axs[i+2]
         xs, ys = d['gamma'], d['M']
         ax.plot(xs, ys, 'x', markersize=10, label=sort_by)
