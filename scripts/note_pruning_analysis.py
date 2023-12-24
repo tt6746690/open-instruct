@@ -548,7 +548,7 @@ def filter_examples_by_numtoks(examples, tokenizer_name_or_path, num_proc=32, ma
     return examples
 
 
-def filter_json_by_numtoks(jsonl_path, max_seq_length=2048):
+def filter_json_by_numtoks(jsonl_path, tokenizer_name='llama7b', max_seq_length=2048):
     """Filter dataset specified by `jsonl_path`,
         so that each example when applied tulu's chat template has numtoks < `max_seq_length`.
         Write the dataset to `jsonl_path`. """
@@ -558,9 +558,16 @@ def filter_json_by_numtoks(jsonl_path, max_seq_length=2048):
         for line in f:
             examples.append(json.loads(line))
 
+    if tokenizer_name.startswith('llama'):
+        tokenizer_name_or_path = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/huggyllama/llama-7b'
+    elif tokenizer_name.startswith('codellama'):
+        tokenizer_name_or_path = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/codellama/CodeLlama-7b-hf'
+    else:
+        raise ValueError(f'Unknown tokenizer_name={tokenizer_name}')
+
     examples = filter_examples_by_numtoks(
         examples,
-        tokenizer_name_or_path='/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/huggyllama/llama-7b',
+        tokenizer_name_or_path=tokenizer_name_or_path,
         max_seq_length=max_seq_length,
         num_proc=64)
 

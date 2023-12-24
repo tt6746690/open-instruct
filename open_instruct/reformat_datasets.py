@@ -405,7 +405,8 @@ def clean_starcoder_data(data_dir, filename, num_proc=16):
     ds = ds.filter(text_within_reasonable_range, num_proc=num_proc)
 
     ## parse score from `generated_output`
-    if 'generated_output' in ds.column_names:
+    if filename.startswith('commentinstrv4'):
+        assert('generated_output' in ds.column_names)
         def parse_score_fn(example):
             match = re.search(r'(Rating|[Ss]core):?\s?\n?(\d)', example['generated_output'])
             score = int(match.group(2)) if match else None
@@ -419,6 +420,25 @@ def clean_starcoder_data(data_dir, filename, num_proc=16):
         ds = ds.filter(lambda x: x['llm_score'] is not None)
         if rating_threshold is not None:
             ds = ds.filter(lambda x: x['llm_score'] >= rating_threshold)
+    elif filename.startswith('commentinstrv5'):
+        """Generated output contains back-translated instructions by deepseek coder
+            - generation not terminated by <|EOT|>, need to remove chars after <|EOT|>
+            - remove instructions that contains keywords like 'instruction'
+        """
+        assert('generated_output' in ds.column_names)
+        def take_substr_before_eot_fn(example):
+            s = example['generated_output']
+            match = re.search(r'(<\|EOT\|>)', s)
+            s = s[:match.start()].strip() if match else s
+            return {'generated_output': s}
+        ds = ds.map(take_substr_before_eot_fn, num_proc=num_proc)
+        def find_keywords_in_generation_fn(example):
+            return not any(x in example['generated_output'] for x in [
+                'instruction',
+            ])
+        ds = ds.filter(find_keywords_in_generation_fn, num_proc=num_proc)
+        ds = ds.remove_columns('docstring')
+        ds = ds.rename_columns({'generated_output': 'docstring'})
 
     ds = ds.rename_columns({'docstring': 'instruction', 'code': 'output'})
     ds = ds.map(lambda _: {'input': ""}, num_proc=num_proc)
@@ -447,6 +467,7 @@ def convert_starcoder_data(data_dir, output_dir):
         # 'commentinstrv3.json',
         # 'commentinstrv4.json',
         # 'commentinstrv4_rge5.json',
+        'commentinstrv5.json',
     ]
     # only keep cleaned data
     filenames = [clean_starcoder_data(data_dir, filename) for filename in filenames]
@@ -482,6 +503,10 @@ def convert_starcoder_data(data_dir, output_dir):
                         {"role": "assistant", "content": encoded_example["completion"]},
                     ]
                 }) + "\n")
+    
+        ## wpq: to avoid truncate examples during training.
+        print(f"Filtering {dataset} to max_seq_length=2048...")
+        filter_json_by_numtoks(output_path, tokenizer_name='codellama', max_seq_length=2048)
 
 
 def convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048.json", num_examples=None, dataset_name="sharegpt"):
