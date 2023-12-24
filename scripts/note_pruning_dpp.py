@@ -534,12 +534,12 @@ def compute_dppmap(
     else:
         raise ValueError(f'kernel_type={kernel_type} not supported.')
     
-    valid_embed_model = ['mpnet', 'bge', 'llama7b', 'llama2:7b', 'mistral7b', 'llama7b+lima']
+    valid_embed_model = ['mpnet', 'bge', 'llama7b', 'llama2:7b', 'mistral7b', 'llama7b+lima', 'codellama7b']
         
     if kernel_embed_model not in valid_embed_model:
         raise ValueError(f'kernel_embed_model={kernel_embed_model} not supported.')
     if theta != 0. and \
-        quality_score_embed_model not in valid_embed_model + ['llama7b+lima']:
+        quality_score_embed_model not in valid_embed_model:
         # if theta!=0, then we're using quality score and so need to specify model
         raise ValueError(f'quality_score_embed_model={quality_score_embed_model} not supported.')
 
