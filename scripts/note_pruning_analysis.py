@@ -720,3 +720,55 @@ def update_metrics_with_highly_repeated_chars(
             json.dump(metrics, f)
             
     return ds, d
+
+
+
+
+def get_alpacafarm_preference_and_generation(save_dir, task='alpacafarm_ann=chatgpt_chatfmt'):
+    ann_file = os.path.join(save_dir, 'eval', task, 'annotations.json')
+    with open(ann_file, 'r') as f:
+        anns = json.load(f)
+    return {'instruction': [x['instruction'] for x in anns],
+            'generation_base': [x['output_1'] for x in anns],
+            'preference': [x['preference'] for x in anns],
+            'generation': [x['output_2'] for x in anns],}
+
+
+def get_alpacafarm_generations(save_dirs, filter_fn_name=None, task='alpacafarm_ann=chatgpt_chatfmt', save_path=None):
+    """Given a list of models, get respective model's generation for alpacaeval's instructions. """
+
+    data = {}
+    for i, save_dir in enumerate(save_dirs):
+        run_name = os.path.basename(save_dir)
+        d = get_alpacafarm_preference_and_generation(save_dir, task=task)
+        d['run_name'] = [run_name]*len(d['generation'])
+        if i == 0:
+            d.update({'run_name_base': [task]*len(d['generation'])})
+        else:
+            del d['generation_base']
+            del d['instruction']
+        d = {f'{k}_{i}' if 'base' not in k and 'instruction' not in k else k: v 
+             for k, v in d.items()}
+        data.update(d)
+        
+    df = pd.DataFrame(data)
+    df = df.sort_index(axis=1)
+
+    if filter_fn_name is not None:
+        if filter_fn_name == 'lw':
+            filter_fn = lambda row: row['preference_0'] == 1. and row['preference_1'] == 2.
+        elif filter_fn_name == 'wl':
+            filter_fn = lambda row: row['preference_0'] == 2. and row['preference_1'] == 1.
+        elif filter_fn_name == 'll':
+            filter_fn = lambda row: row['preference_0'] == 1. and row['preference_1'] == 1.
+        else:
+            raise ValueError(f'Unknown filter_fn_name={filter_fn_name}')
+        df = df[df.apply(filter_fn, axis=1)]
+    df = df.reset_index(drop=True)
+    df = df.reset_index(drop=False)
+
+    if save_path is not None:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        df.to_json(save_path, orient='records', indent=4, index=True)
+
+    return df
