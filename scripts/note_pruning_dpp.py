@@ -806,6 +806,7 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sor
         'stanford_alpaca': 52_002,
         'tulu_v2':  283_434,
         'wizardlm': 143_000,
+        'starcoder_commentinstrv5': 57_290,
     }
 
     if isinstance(dataset, list):
