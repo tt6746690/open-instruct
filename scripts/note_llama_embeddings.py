@@ -4,13 +4,14 @@ import os
 import numpy as np
 import time
 import re
+import math
 
 import random
 import pickle
 from tqdm import tqdm 
 import datetime
 
-from sklearn.random_projection import SparseRandomProjection
+from sklearn.random_projection import SparseRandomProjection, GaussianRandomProjection
 
 import pyarrow # import before `torch`, `transformers`, `datasets`
 import torch
@@ -58,8 +59,11 @@ def encode_just_one_role(example, tokenizer, max_seq_length, encode_fn_type, add
 
 def sklearn_rp_mat_size(rp):
     if hasattr(rp, "components_"):
-        n_bytes = rp.components_.data.nbytes
-        n_bytes += rp.components_.indices.nbytes
+        if isinstance(rp.components_, np.ndarray):
+            n_bytes = rp.components_.nbytes
+        else:
+            n_bytes = rp.components_.data.nbytes
+            n_bytes += rp.components_.indices.nbytes
         return n_bytes
     
 
@@ -72,6 +76,61 @@ def torch_cdist(X, device):
     D = D.cpu().numpy()
     return D
     
+
+
+def torch_cdist_chunked(X, device, chunk_size=None, mem_total=12):
+    """Compute cdist on GPU with reduced peak memory usage.
+    
+        ```
+        from note_llama_embeddings import torch_cdist, torch_cdist_chunked
+        X = torch.from_numpy(np.random.rand(1000, 1000))
+        D0 = torch_cdist(X, 'cpu')
+        D1 = torch_cdist(X, 'cuda')
+        D2 = torch_cdist_chunked(X, 'cpu', chunk_size=None)
+        D3 = torch_cdist_chunked(X, 'cuda', chunk_size=500)
+
+        print(np.abs((D0-D1)).max())
+        print(np.abs((D0-D2)).max())
+        print(np.abs((D2-D3)).max())
+        print(np.abs((D1-D3)).max(), np.abs((D1-D3)).mean())
+        ```
+    
+    """
+    if isinstance(X, np.ndarray):
+        X = torch.from_numpy(X)
+
+    X = X.to(torch.float32)
+    N = X.shape[0]
+    D = X.shape[1]
+    
+    if chunk_size is None:
+        chunk_size = N
+    elif chunk_size == 'auto':
+        mem_X = N*D*4 / (1024**3)
+        chunk_size = math.floor((mem_total / (mem_X*2)) * N)
+        chunk_size = min(chunk_size, N)
+        print(f'[torch_cdist_chunked] set chunk_size = {chunk_size} for (N, D) = ({N}, {D})')
+
+    Ds = []
+    for i in range(0, N, chunk_size):
+        Xi = X[i:i+chunk_size, :].to(device)
+        for j in range(0, N, chunk_size):
+            Xj = X[j:j+chunk_size, :].to(device)
+            D = torch.cdist(Xi, Xj)
+            Ds.append(D.cpu().numpy())
+            del Xj, D
+        del Xi
+    
+    nchunks = np.sqrt(len(Ds))
+    if not nchunks.is_integer():
+        raise ValueError(f'[torch_cdist_chunked] nchunks={nchunks} not integer')
+    nchunks = int(nchunks)
+
+    Ds_mat = [Ds[i:i+nchunks] for i in range(0, len(Ds), nchunks)]
+    D = np.vstack([np.hstack(x) for x in Ds_mat])
+
+    return D
+
 
 def plt_pair_of_dists(D1, D2, n_components, use_hexbin=True):
     import matplotlib.pyplot as plt
@@ -204,8 +263,18 @@ def compute_grad_norm(l):
     return output
 
 
+def np_shift_rows_then_sum_cols(A):
+    A_shifted = np.zeros_like(A)
+    for i in range(A.shape[0]):
+        A_shifted[i, :] = np.roll(A[i, :], i)
+    s = np.sum(A_shifted, axis=0)
+    return s
+
+
 @torch.inference_mode()
-def gather_grad_embeddings(model, patterns, stacked=True):
+def gather_grad_embeddings(model, patterns, stacked=True, add_rsum=False):
+    """Gather grad vectors from `model`.
+        if `add_rsum` is True, then sum over rows for grad matrices with & without row-wise cyclic shift"""
 
     param_names = []
     grads = []
@@ -217,18 +286,24 @@ def gather_grad_embeddings(model, patterns, stacked=True):
     grad_embeddings = {}
     for pattern_name, pattern in patterns.items():
         grads_filtered = list(filter(lambda x: True if re.search(pattern, x[0]) else False,
-                                     zip(param_names, grads)))
+                                    zip(param_names, grads)))
         g = [x[1] for x in grads_filtered]
         if not grads_filtered:
             continue
+        grad_embeddings[pattern_name] = g
         
-        if stacked:
+        if add_rsum:
+            grad_embeddings[f'{pattern_name}rsum'] = [x.sum(0) for x in g]
+            grad_embeddings[f'{pattern_name}rsumcyc'] = [np_shift_rows_then_sum_cols(x) for x in g]
+            
+    if stacked:
+        for k in list(grad_embeddings.keys()):
+            g = grad_embeddings[k]
             # the resulting g has the correct ordering, i.e.,
             # parameters associated with any weight matrix is grouped together.
             g = [x.reshape(-1) for x in g]
             g = np.hstack(g).reshape(-1)
-        grad_embeddings[pattern_name] = g
-        
+            grad_embeddings[k] = g
     return grad_embeddings
 
 
@@ -375,10 +450,12 @@ def compute_lm_outputs(
         lora_rank=128,
         lora_alpha=128,
         compute_grad_embeddings=False,
+        save_grad_embeddings=False,
         grad_randproj_components=2048,
         max_seq_len=2048,
         encode_fn_type='sft',
         text_pooling_type='meanpool',
+        add_rsum=False,
     ):
     """
         `shuffle` to allow each process to process roughly similar workload cross the dataset 
@@ -606,21 +683,25 @@ def compute_lm_outputs(
                     model,
                     {k: v for k, v in grad_statistic_patterns.items() if k in ['qkv', 'loraB']},
                     stacked=True,
+                    add_rsum=add_rsum,
                 )
-                if test_run:
+                if save_grad_embeddings:
                     for k, v in grad_embeddings.items():
                         output[f'grad_{k}'].append(v)
                 if i==0:
                     rps = {}
                     for k, v in grad_embeddings.items():
                         t0 = time.time()
-                        rps[k] = SparseRandomProjection(n_components=grad_randproj_components, random_state=0)
+                        if 'rsum' not in k:
+                            rps[k] = SparseRandomProjection(n_components=grad_randproj_components, random_state=0)
+                        else:
+                            rps[k] = GaussianRandomProjection(n_components=grad_randproj_components, random_state=0)
                         print(f"Fitting random projection for {k} ({v.size} -> {grad_randproj_components})")
                         rps[k] = rps[k].fit(v[np.newaxis,...])
                         print(f"Fitting random projection in {time.time() - t0:0.3f}s "
                             f"with random matrix size {sklearn_rp_mat_size(rps[k]) / 1e6:0.3f} MB")
-                        print('Log statistics of projection matrix to ensure same initialization cross procs:\n'
-                              f"{np.mean(rps[k].components_ != 0)}, {np.max(rps[k].components_)}, {np.mean(rps[k].components_[0])}")
+                        print(f'Log statistics of projection matrix for {k} to ensure same initialization cross procs:\n'
+                            f"{np.mean(rps[k].components_ != 0)}, {np.max(rps[k].components_)}, {np.mean(rps[k].components_[0])}")
                 for k in grad_embeddings.keys():
                     rp = rps[k]
                     g = grad_embeddings[k]
@@ -705,10 +786,12 @@ if __name__ == "__main__":
     parser.add_argument("--lora_rank", type=int, default=128)
     parser.add_argument("--lora_alpha", type=int, default=128)
     parser.add_argument("--compute_grad_embeddings", action='store_true', default=False)
+    parser.add_argument("--save_grad_embeddings", action='store_true', default=False)
     parser.add_argument("--grad_randproj_components", type=int, default=2048)
     parser.add_argument("--max_seq_len", type=int, default=2048)
     parser.add_argument("--encode_fn_type", type=str, default='sft')
     parser.add_argument("--text_pooling_type", type=str, default="meanpool")
+    parser.add_argument("--add_rsum", action='store_true', default=False)
 
 
 
