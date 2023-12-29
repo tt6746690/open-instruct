@@ -24,7 +24,35 @@ import sys
 sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
 from dpp import dpp
 
-from note_pruning_analysis import get_lm_output, get_dataset, get_full_model_name, scripts_dir
+from note_pruning_analysis import get_lm_output, get_dataset, scripts_dir
+
+
+
+md_to_model_name = {
+    'mpnet': 'all-mpnet-base-v2',
+    'bge': 'bge-large-en-v1.5',
+    'llama7b': 'llama-7b+lora:r=256:a=256',
+    'llama2:7b': 'llama2-7b+lora:r=256:a=256',
+    'codellama7b': 'codellama-7b+lora:r=256:a=256',
+    'mistral7b': 'mistral-7b+lora:r=256:a=256',
+    'llama7b+lima': 'llama-7b+lima+lora:r=256:a=256',
+}
+
+# after fixed bug in lora init -> unbiased pairwise distance.
+# try different projection dimension (default 2048)
+md_to_model_name.update({
+    'llama7br256p4096': 'llama-7b+lora:r=256:a=4096+proj=4096',
+    'llama7br512p4096': 'llama-7b+lora:r=512:a=11585+proj=4096',
+    'pythia1br512p4096': 'pythia-1b+lora:r=512:a=11585+proj=4096',
+})
+
+
+def get_full_model_name(md):
+    if md in md_to_model_name:
+        model_name = md_to_model_name[md]
+    else:
+        raise ValueError(f'Dont know full name for model_name: {md}')
+    return model_name
 
 
 
@@ -534,7 +562,7 @@ def compute_dppmap(
     else:
         raise ValueError(f'kernel_type={kernel_type} not supported.')
     
-    valid_embed_model = ['mpnet', 'bge', 'llama7b', 'llama2:7b', 'mistral7b', 'llama7b+lima', 'codellama7b']
+    valid_embed_model = list(md_to_model_name.keys())
         
     if kernel_embed_model not in valid_embed_model:
         raise ValueError(f'kernel_embed_model={kernel_embed_model} not supported.')

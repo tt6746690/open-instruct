@@ -347,6 +347,20 @@ def save_prune_results(save_dir, inds, S, pkl_extra, sort_by, model_name, datase
             save_text_viz_for_curriculum(save_path)
 
 
+
+def check_md_and_model_name_match(md, model_name):
+    """Ensures that the model_name matches the model_name in the sort_by string.
+        so that in dppmap will output results to the correct directory, i.e., 
+        directory with model that is used to generate embeddings for similarity kernel."""
+    if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
+        (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
+        (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
+        (md == 'llama2:7b' and not model_name.lower().startswith('llama2-7b')) or \
+        (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')) or \
+        (md == 'codellama7b' and not model_name.lower().startswith('codellama-7b')):
+        raise ValueError(f'md={md} does not match with model_name={model_name}')
+    
+    
 def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
 
     from note_pruning_analysis import get_lm_output
@@ -460,14 +474,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
     elif sort_by.startswith('dppmap_'):
         kvs = parse_kv_from_string(sort_by)
-        md = kvs['kmd']
-        if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
-            (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
-            (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
-            (md == 'llama2:7b' and not model_name.lower().startswith('llama2-7b')) or \
-            (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')) or \
-            (md == 'codellama7b' and not model_name.lower().startswith('codellama-7b')):
-            raise ValueError(f'md={md} does not match with model_name={model_name}')
+        check_md_and_model_name_match(kvs['kmd'], model_name)
         if 'gamma=auto' in sort_by:
             S, info = parse_sort_by_and_compute_dppmap_autotune_gamma(sort_by, dataset)
             if S is None and info is None:
@@ -477,14 +484,7 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         pkl_extra['info'] = info
     elif sort_by.startswith('dppmapbd'):
         kvs = parse_kv_from_string(sort_by)
-        md = kvs['kmd']
-        if (md == 'mpnet' and model_name != 'all-mpnet-base-v2') or \
-            (md == 'bge' and model_name != 'bge-large-en-v1.5') or \
-            (md == 'llama7b' and not model_name.lower().startswith('llama-7b')) or \
-            (md == 'llama2:7b' and not model_name.lower().startswith('llama2-7b')) or \
-            (md == 'mistral7b' and not model_name.lower().startswith('mistral-7b')) or \
-            (md == 'codellama7b' and not model_name.lower().startswith('codellama-7b')):
-            raise ValueError(f'md={md} does not match with model_name={model_name}')
+        check_md_and_model_name_match(kvs['kmd'], model_name)
         if kvs['k'] == 'vmf':
             kernel_kwargs = {'gamma': kvs['gamma']}
         elif kvs['k'] == 'rbf':

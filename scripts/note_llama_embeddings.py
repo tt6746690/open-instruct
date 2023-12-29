@@ -41,7 +41,7 @@ def torch_cdist(X, device):
     
 
 
-def torch_cdist_chunked(X, device, chunk_size=None, mem_total=12):
+def torch_cdist_chunked(X, device, chunk_size=None, mem_total=12, normalize=False):
     """Compute cdist on GPU with reduced peak memory usage.
     
         ```
@@ -77,8 +77,12 @@ def torch_cdist_chunked(X, device, chunk_size=None, mem_total=12):
     Ds = []
     for i in range(0, N, chunk_size):
         Xi = X[i:i+chunk_size, :].to(device)
+        if normalize:
+            Xi = Xi / torch.linalg.norm(Xi, ord=2, dim=1, keepdim=True)
         for j in range(0, N, chunk_size):
             Xj = X[j:j+chunk_size, :].to(device)
+            if normalize:
+                Xj = Xj / torch.linalg.norm(Xj, ord=2, dim=1, keepdim=True)
             D = torch.cdist(Xi, Xj)
             Ds.append(D.cpu().numpy())
             del Xj, D
@@ -143,8 +147,8 @@ def plt_pair_of_dists(D1, D2, use_hexbin=True):
         cb.set_label("Sample pairs counts")
     else:
         ax.scatter(D1, D2, s=1, alpha=0.1)
-        # ax.set_xlim(min_dist, max_dist)
-        # ax.set_ylim(min_dist, max_dist)
+        ax.set_xlim(min_dist, max_dist)
+        ax.set_ylim(min_dist, max_dist)
     ax.plot([min_dist, max_dist], [min_dist, max_dist], color='red', linestyle='--')
     ax.set_xlabel("Pairwise dist D1")
     ax.set_ylabel("Pairwise dist D2")
@@ -190,25 +194,27 @@ def grad_vectors_compute_cdist(dataset, model_names):
     for model_name in model_names:
         sizes = {}
         Ds = {}
+        Ds_norm = {}
 
         save_path = os.path.join('model_outputs', 'sft', model_name, f'{dataset}.pkl')
         with open(save_path, 'rb') as f:
             o = pickle.load(f)
             for k in [x for x in o.keys() if x.startswith('grad') and 'l2n' not in x]:
                 print(f'Computing distance for {k} of size {o[k].shape}')
-                Ds[k] = torch_cdist_chunked(o[k], device='cuda', chunk_size='auto', mem_total=12)
+                Ds[k] = torch_cdist_chunked(o[k], device='cuda', chunk_size='auto', mem_total=12, normalize=False)
+                Ds_norm[k] = torch_cdist_chunked(o[k], device='cuda', chunk_size='auto', mem_total=12, normalize=True)
                 sizes[k] = o[k].shape
             del o
 
         save_path = os.path.join('model_outputs', 'sft', model_name, f'{dataset}_dist.pkl')
         with open(save_path, 'wb') as f:
-            output = {'Ds': Ds, 'sizes': sizes}
+            output = {'Ds': Ds, 'Ds_norm': Ds_norm, 'sizes': sizes}
             pickle.dump(output, f)
 
 
 
 
-def get_grad_vectors_cdist(dataset, model_names):
+def get_grad_vectors_cdist(dataset, model_names, compute_dist_with_normalized_vector=False, base_vector_name='grad_qkv'):
     """Gather results from `grad_vectors_compute_cdist`
         
         ```
@@ -225,6 +231,8 @@ def get_grad_vectors_cdist(dataset, model_names):
         Ds, df = get_grad_vectors_cdist(dataset, model_names)
         ```
     """
+    Ds_key = 'Ds_norm' if compute_dist_with_normalized_vector else 'Ds'
+
     Ds = {}
     sizes = {}
     for model_name in model_names:
@@ -238,7 +246,7 @@ def get_grad_vectors_cdist(dataset, model_names):
         save_path = os.path.join('model_outputs', 'sft', model_name, f'{dataset}_dist.pkl')
         with open(save_path, 'rb') as f:
             o = pickle.load(f)
-            o_Ds = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}' if lora_rank else k: v for k, v in o['Ds'].items()}
+            o_Ds = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}' if lora_rank else k: v for k, v in o[Ds_key].items()}
             o_sizes = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}' if lora_rank else k: v for k, v in o['sizes'].items()}
             if lora_rank is None:
                 o_Ds = {k: v for k, v in o_Ds.items() if k in ['grad_qkv', 'grad_rp_qkv']}
@@ -247,7 +255,7 @@ def get_grad_vectors_cdist(dataset, model_names):
             sizes.update(o_sizes)
 
     ## flatten & select non-identical pairs.
-    nonzero = Ds['grad_qkv']!=0
+    nonzero = Ds[base_vector_name]!=0
     for k in list(Ds.keys()):
         v = Ds[k]
         Ds[k] = v[nonzero].ravel()
@@ -255,9 +263,9 @@ def get_grad_vectors_cdist(dataset, model_names):
 
     statistics = []
     for k, D in Ds.items():
-        if k == 'grad_qkv':
+        if k == base_vector_name:
             continue
-        rates = Ds[k] / Ds['grad_qkv']
+        rates = Ds[k] / Ds[base_vector_name]
         statistics.append({
             'name': k,
             'shape': sizes[k],
@@ -646,7 +654,7 @@ def compute_lm_outputs(
         encode_fn_type='sft',
         text_pooling_type='meanpool',
         add_rsum=False,
-        torch_dtype='float32',
+        torch_dtype='float16',
     ):
     """
         `shuffle` to allow each process to process roughly similar workload cross the dataset 

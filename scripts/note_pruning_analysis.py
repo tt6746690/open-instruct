@@ -141,27 +141,6 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None, num_proc=128, max_s
     return ds
 
 
-def get_full_model_name(md):
-    if md == 'mpnet':
-        model_name = 'all-mpnet-base-v2'
-    elif md == 'bge':
-        model_name = 'bge-large-en-v1.5'
-    elif md == 'llama7b':
-        model_name = 'llama-7b+lora:r=256:a=256'
-    elif md == 'llama2:7b':
-        model_name = 'llama2-7b+lora:r=256:a=256'
-    elif md == 'codellama7b':
-        model_name = 'codellama-7b+lora:r=256:a=256'
-    elif md == 'mistral7b':
-        model_name = 'mistral-7b+lora:r=256:a=256'
-    elif md == 'llama7b+lima':
-        model_name = 'llama-7b+lima+lora:r=256:a=256'
-    else:
-        raise ValueError(f'Dont know full name for model_name: {md}')
-    return model_name
-
-
-
 def get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embedding=True, fill_nan=True):
     """`model_name` is name of directory under `model_outputs`. """
     save_path = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}.pkl')
