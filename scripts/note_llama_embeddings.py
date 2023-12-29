@@ -67,119 +67,6 @@ def sklearn_rp_mat_size(rp):
         return n_bytes
     
 
-def torch_cdist(X, device):
-    """Compute cdist on gpu."""
-    if isinstance(X, np.ndarray):
-        X = torch.from_numpy(X)
-    X = X.to(torch.float32).to(device).unsqueeze(0)
-    D = torch.cdist(X, X)
-    D = D.cpu().numpy()
-    return D
-    
-
-
-def torch_cdist_chunked(X, device, chunk_size=None, mem_total=12):
-    """Compute cdist on GPU with reduced peak memory usage.
-    
-        ```
-        from note_llama_embeddings import torch_cdist, torch_cdist_chunked
-        X = torch.from_numpy(np.random.rand(1000, 1000))
-        D0 = torch_cdist(X, 'cpu')
-        D1 = torch_cdist(X, 'cuda')
-        D2 = torch_cdist_chunked(X, 'cpu', chunk_size=None)
-        D3 = torch_cdist_chunked(X, 'cuda', chunk_size=500)
-
-        print(np.abs((D0-D1)).max())
-        print(np.abs((D0-D2)).max())
-        print(np.abs((D2-D3)).max())
-        print(np.abs((D1-D3)).max(), np.abs((D1-D3)).mean())
-        ```
-    
-    """
-    if isinstance(X, np.ndarray):
-        X = torch.from_numpy(X)
-
-    X = X.to(torch.float32)
-    N = X.shape[0]
-    D = X.shape[1]
-    
-    if chunk_size is None:
-        chunk_size = N
-    elif chunk_size == 'auto':
-        mem_X = N*D*4 / (1024**3)
-        chunk_size = math.floor((mem_total / (mem_X*2)) * N)
-        chunk_size = min(chunk_size, N)
-        print(f'[torch_cdist_chunked] set chunk_size = {chunk_size} for (N, D) = ({N}, {D})')
-
-    Ds = []
-    for i in range(0, N, chunk_size):
-        Xi = X[i:i+chunk_size, :].to(device)
-        for j in range(0, N, chunk_size):
-            Xj = X[j:j+chunk_size, :].to(device)
-            D = torch.cdist(Xi, Xj)
-            Ds.append(D.cpu().numpy())
-            del Xj, D
-        del Xi
-    
-    nchunks = np.sqrt(len(Ds))
-    if not nchunks.is_integer():
-        raise ValueError(f'[torch_cdist_chunked] nchunks={nchunks} not integer')
-    nchunks = int(nchunks)
-
-    Ds_mat = [Ds[i:i+nchunks] for i in range(0, len(Ds), nchunks)]
-    D = np.vstack([np.hstack(x) for x in Ds_mat])
-
-    return D
-
-
-def plt_pair_of_dists(D1, D2, n_components, use_hexbin=True):
-    import matplotlib.pyplot as plt
-
-    plt.rcParams.update({'font.size': 16})
-
-    fig, axs = plt.subplots(1,2,figsize=(12,6))
-    ax = axs[0]
-    min_dist = min(D2.min(), D1.min())
-    max_dist = max(D2.max(), D1.max())
-    max_dist = max(np.quantile(D2, .95), np.quantile(D1, .95))
-    if use_hexbin:
-        hb = ax.hexbin(
-            D1,
-            D2,
-            gridsize=100,
-            cmap=plt.cm.PuBu,
-            extent=[min_dist, max_dist, min_dist, max_dist],
-        )
-        cb = plt.colorbar(hb, ax=ax)
-        cb.set_label("Sample pairs counts")
-    else:
-        ax.scatter(D1, D2, s=1, alpha=0.1)
-        ax.set_xlim(min_dist, max_dist)
-        ax.set_ylim(min_dist, max_dist)
-    ax.plot([min_dist, max_dist], [min_dist, max_dist], color='red', linestyle='--')
-    ax.set_xlabel("Pairwise dist original")
-    ax.set_ylabel("Pairwise dist projected")
-    ax.set_title(f"Pairwise dist (M={n_components})")
-
-
-    rates = D2 / D1
-
-    ax = axs[1]
-    ax.hist(rates, bins=50, range=(0.0, 2.0), edgecolor="k", density=True)
-
-    rates_mean, rates_std = np.mean(rates), np.std(rates)
-    ax.axvline(rates_mean, color='r', linestyle='dashed', linewidth=2, label=f'Mean: {rates_mean:.2f}')
-    ax.axvline(rates_mean + 2 * rates_std, color='g', linestyle='dashed', linewidth=2, label=f'2*std: {2*rates_std:.2f}')
-    ax.axvline(rates_mean - 2 * rates_std, color='g', linestyle='dashed', linewidth=2)
-    ax.legend()
-    ax.set_xlabel("distances rate: projected / original")
-    ax.set_ylabel("Distribution of samples pairs")
-    ax.set_title(f"Pairwise projected_dist/dist (M={n_components})")
-
-    fig.tight_layout()
-
-    return fig, axs
-
     
 def get_grad_statistic_pattern(model_name_or_path, use_lora):
     if use_lora:
@@ -456,6 +343,7 @@ def compute_lm_outputs(
         encode_fn_type='sft',
         text_pooling_type='meanpool',
         add_rsum=False,
+        torch_dtype='float32',
     ):
     """
         `shuffle` to allow each process to process roughly similar workload cross the dataset 
@@ -494,7 +382,8 @@ def compute_lm_outputs(
         model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path,
             device_map=device,
-            torch_dtype=torch.float16)
+            torch_dtype=getattr(torch, torch_dtype),
+        )
 
     if use_lora:
         if not compute_grad:
@@ -522,6 +411,7 @@ def compute_lm_outputs(
             lora_alpha=lora_alpha, 
             lora_dropout=0.,
             target_modules=target_modules,
+            init_lora_weights='gaussian',
         )
         
         # https://github.com/huggingface/peft/issues/137
@@ -792,6 +682,7 @@ if __name__ == "__main__":
     parser.add_argument("--encode_fn_type", type=str, default='sft')
     parser.add_argument("--text_pooling_type", type=str, default="meanpool")
     parser.add_argument("--add_rsum", action='store_true', default=False)
+    parser.add_argument("--torch_dtype", type=str, default="float16")
 
 
 
