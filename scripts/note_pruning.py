@@ -351,6 +351,13 @@ def compute_ranking_dedup(sort_by, dataset):
 
 
 def compute_ranking_dppmap(sort_by, dataset):
+    """
+        ```
+        sort_by = 'dppmap_nc=200_k=lin_kmd=mpnet'
+        sort_by = 'dppmap_nc=200_k=vmf_gamma=3.0_kmd=mpnet'
+        sort_by = 'dppmap_nc=200_theta=.3_k=vmf_gamma=3.0_kmd=mpnet_q=ifd_qmd=llama7b+lima'
+        ```
+    """
     if 'gamma=auto' in sort_by:
         S, info = parse_sort_by_and_compute_dppmap_autotune_gamma(sort_by, dataset)
         if S is None and info is None:
