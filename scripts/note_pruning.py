@@ -84,115 +84,6 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
     return D, kmeans
 
 
-
-def cholesky_jitter(K, jitter=1e-5):
-    K[np.diag_indices_from(K)] += jitter
-    return K
-
-
-def sort_dpp_map(X, logP, kernel_type='Kcos'):
-    import sys
-    sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
-    from dpp import dpp
-    
-    logP = torch.from_numpy(logP).to('cuda')
-    P = logP.exp().to('cpu')
-    
-    N = P.shape[0]
-    
-    X = torch.from_numpy(X).to('cuda')
-    X = torch.nn.functional.normalize(X, dim=-1)
-    # S = T@T.T out-of-memory
-    # use block-wise matmul to reduce peak memory usage.
-    L = []
-    for Xn in torch.split(X, 3000):
-        L.append((Xn@X.T).to('cpu'))
-    S = torch.vstack(L)
-    
-    if kernel_type == 'Kcos':
-        K = S
-    elif kernel_type == 'Kcosp':
-        K = P.reshape(N,1)*S*P.reshape(1,N)
-    elif kernel_type == 'Kcos1np':
-        K = (1-P).reshape(N,1)*S*(1-P).reshape(1,N)
-    else:
-        raise ValueError(f'Invalid kernel_type={kernel_type}')
-        
-    K = K.numpy()
-    K = cholesky_jitter(K, jitter=1e-3)
-
-    inds = dpp(K, N)
-    if len(inds) != N:
-        print(f'dpp map len(indices)={len(inds)} != {N} = N')
-        
-    return inds 
-
-
-def sort_dpp_map_memefficient(X, logP, kernel_type='Kcos', torch_compile=False):
-    """O(N) memory instead of O(N^2) memory, due to lazily evalute kernel matrix."""
-    import sys
-    sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
-    from dpp import dpp_lazy
-
-    logP = torch.from_numpy(logP).to('cuda')
-    P = logP.exp()
-
-    N = P.shape[0]
-
-    if torch_compile:
-        X = X / np.linalg.norm(X, axis=-1, ord=2, keepdims=True)
-    else:
-        X = torch.from_numpy(X).to('cuda')
-        X = torch.nn.functional.normalize(X, dim=-1)
-
-    jitter = 1e-3
-
-    def kernel_matrix_ith_row(i):
-        """Returns i-th row of kernel matrix `K`"""
-        if kernel_type == 'Kcos':
-            Ki = X[i]@X.T
-        elif kernel_type == 'Kcosp':
-            Ki = P[i]*X[i]@X.T*P.reshape(1,N)
-        elif kernel_type == 'Kcos1np':
-            Ki = (1-P[i])*X[i]@X.T*(1-P.reshape(1,N))
-        else:
-            raise ValueError(f'kernel_type={kernel_type} not supported')
-        Ki = Ki.squeeze()
-        Ki[i] += jitter
-        if torch_compile:
-            return Ki
-        else:
-            return Ki.to('cpu').numpy()
-
-    def kernel_matrix_diag(): 
-        if kernel_type == 'Kcos':
-            Kdiag = (X*X).sum(-1)
-        elif kernel_type == 'Kcosp':
-            Kdiag = (X*X).sum(-1) * (P*P)
-        elif kernel_type == 'Kcos1np':
-            Kdiag = (X*X).sum(-1) * ((1-P)*(1-P))
-        else:
-            raise ValueError(f'kernel_type={kernel_type} not supported')
-        Kdiag = Kdiag.squeeze()
-        Kdiag += jitter
-        if torch_compile:
-            return Kdiag
-        else:
-            return Kdiag.to('cpu').numpy()
-         
-    max_length = min(50000, int(.3*N))
-    if torch_compile:
-        dpp_lazy = torch.compile(dpp_lazy)
-        kernel_matrix_ith_row = torch.compile(kernel_matrix_ith_row)
-        kernel_matrix_diag = torch.compile(kernel_matrix_diag)
-    inds = dpp_lazy(N, kernel_matrix_ith_row, kernel_matrix_diag, max_length, jitter)
-    if len(inds) != N:
-        print(f'dpp map len(indices)={len(inds)} != {N} = N')
-    
-    return inds
-
-
-
 def parse_sort_by_and_compute_dppmap(sort_by, dataset):
     kvs = parse_kv_from_string(sort_by)
     if kvs['k'] == 'vmf':
@@ -464,14 +355,6 @@ def main(dataset, sort_by, save_dir, model_name, test_run, encode_fn_type):
         X = d[embed_type]
         Y = np.zeros(X.shape[0])
         S = note_pruning_clustering.semdedup(X, Y, dist=dist, device='cpu')
-    elif sort_by.startswith('dpp_'):
-        match = re.search(r'k=(\w+)', sort_by)
-        kernel_type = match.group(1) if match else None
-        match = re.search(r'emb=([^_]+)', sort_by)
-        embed_type = re.sub(r'[+]', '_', match.group(1)) if match else 'text_embedding'
-        emb = d[embed_type]
-        log_prob = d['log_prob']
-        inds = sort_dpp_map_memefficient(emb, log_prob, kernel_type=kernel_type, torch_compile=False)
     elif sort_by.startswith('dppmap_'):
         kvs = parse_kv_from_string(sort_by)
         check_md_and_model_name_match(kvs['kmd'], model_name)
