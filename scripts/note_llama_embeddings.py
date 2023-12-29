@@ -1,7 +1,6 @@
 from collections import defaultdict
 from functools import partial
 import os
-import numpy as np
 import time
 import re
 import math
@@ -11,6 +10,8 @@ import pickle
 from tqdm import tqdm 
 import datetime
 
+import numpy as np
+import pandas as pd
 from sklearn.random_projection import SparseRandomProjection, GaussianRandomProjection
 
 import pyarrow # import before `torch`, `transformers`, `datasets`
@@ -24,6 +25,308 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
+
+
+
+
+
+def torch_cdist(X, device):
+    """Compute cdist on gpu."""
+    if isinstance(X, np.ndarray):
+        X = torch.from_numpy(X)
+    X = X.to(torch.float32).to(device).unsqueeze(0)
+    D = torch.cdist(X, X)
+    D = D.cpu().numpy()
+    return D
+    
+
+
+def torch_cdist_chunked(X, device, chunk_size=None, mem_total=12):
+    """Compute cdist on GPU with reduced peak memory usage.
+    
+        ```
+        from note_llama_embeddings import torch_cdist, torch_cdist_chunked
+        X = torch.from_numpy(np.random.rand(1000, 1000))
+        D0 = torch_cdist(X, 'cpu')
+        D1 = torch_cdist(X, 'cuda')
+        D2 = torch_cdist_chunked(X, 'cpu', chunk_size=None)
+        D3 = torch_cdist_chunked(X, 'cuda', chunk_size=500)
+
+        print(np.abs((D0-D1)).max())
+        print(np.abs((D0-D2)).max())
+        print(np.abs((D2-D3)).max())
+        print(np.abs((D1-D3)).max(), np.abs((D1-D3)).mean())
+        ```
+    
+    """
+    if isinstance(X, np.ndarray):
+        X = torch.from_numpy(X)
+
+    X = X.to(torch.float32)
+    N = X.shape[0]
+    D = X.shape[1]
+    
+    if chunk_size is None:
+        chunk_size = N
+    elif chunk_size == 'auto':
+        mem_X = N*D*4 / (1024**3)
+        chunk_size = math.floor((mem_total / (mem_X*2)) * N)
+        chunk_size = min(chunk_size, N)
+        print(f'[torch_cdist_chunked] set chunk_size = {chunk_size} for (N, D) = ({N}, {D})')
+
+    Ds = []
+    for i in range(0, N, chunk_size):
+        Xi = X[i:i+chunk_size, :].to(device)
+        for j in range(0, N, chunk_size):
+            Xj = X[j:j+chunk_size, :].to(device)
+            D = torch.cdist(Xi, Xj)
+            Ds.append(D.cpu().numpy())
+            del Xj, D
+        del Xi
+    
+    nchunks = np.sqrt(len(Ds))
+    if not nchunks.is_integer():
+        raise ValueError(f'[torch_cdist_chunked] nchunks={nchunks} not integer')
+    nchunks = int(nchunks)
+
+    Ds_mat = [Ds[i:i+nchunks] for i in range(0, len(Ds), nchunks)]
+    D = np.vstack([np.hstack(x) for x in Ds_mat])
+
+    return D
+
+
+def plt_pair_of_dists(D1, D2, use_hexbin=True):
+    """visualize pair-wise distance distribution of two sets of samples.
+
+        ```
+        from note_llama_embeddings import get_grad_vectors_cdist, plt_pair_of_dists
+        dataset = 'lima'
+        model_names = [
+            'pythia-160m',
+            'pythia-160m+lora:r=256:a=4096',
+            'pythia-160m+lora:r=512:a=11585',
+            'pythia-160m+lora:r=512:a=11585+proj=1024',
+            'pythia-160m+lora:r=512:a=11585+proj=4096',
+            'pythia-160m+lora:r=512:a=11585+proj=8192',
+        ]
+        Ds, df = get_grad_vectors_cdist(dataset, model_names)
+                
+        filter_key_fn = lambda k: 'grad_rp_loraB_r=512' in k
+        for k in sorted(list(Ds.keys())):
+            if not filter_key_fn(k): continue
+            if k == 'grad_qkv':
+                continue
+            fig, axs = plt_pair_of_dists(Ds['grad_qkv'], Ds[k], use_hexbin=False)
+            fig.suptitle(f"[{dataset}:{model_name}] D1=grad_qkv {sizes['grad_qkv']}, D2={k} {sizes[k]}")
+            fig.tight_layout()
+        ```
+    
+    """
+    import matplotlib.pyplot as plt
+
+    plt.rcParams.update({'font.size': 16})
+
+    fig, axs = plt.subplots(1,2,figsize=(12,6))
+    ax = axs[0]
+    min_dist = min(D2.min(), D1.min())
+    max_dist = max(D2.max(), D1.max())
+    max_dist = max(np.quantile(D2, .95), np.quantile(D1, .95))
+    if use_hexbin:
+        hb = ax.hexbin(
+            D1,
+            D2,
+            gridsize=100,
+            cmap=plt.cm.PuBu,
+            extent=[min_dist, max_dist, min_dist, max_dist],
+        )
+        cb = plt.colorbar(hb, ax=ax)
+        cb.set_label("Sample pairs counts")
+    else:
+        ax.scatter(D1, D2, s=1, alpha=0.1)
+        # ax.set_xlim(min_dist, max_dist)
+        # ax.set_ylim(min_dist, max_dist)
+    ax.plot([min_dist, max_dist], [min_dist, max_dist], color='red', linestyle='--')
+    ax.set_xlabel("Pairwise dist D1")
+    ax.set_ylabel("Pairwise dist D2")
+
+
+    rates = D2 / D1
+
+    ax = axs[1]
+    ax.hist(rates, bins=50, range=(0., 2.), edgecolor="k", density=True)
+
+    rates_mean, rates_std = np.mean(rates), np.std(rates)
+    ax.axvline(rates_mean, color='r', linestyle='dashed', linewidth=2, label=f'Mean: {rates_mean:.4f}')
+    ax.axvline(rates_mean + 2 * rates_std, color='g', linestyle='dashed', linewidth=2, label=f'2*std: {2*rates_std:.4f}')
+    ax.axvline(rates_mean - 2 * rates_std, color='g', linestyle='dashed', linewidth=2)
+    ax.legend()
+    ax.set_xlabel("distances rate: D2 / D1")
+    ax.set_ylabel("Distribution of samples pairs")
+
+    fig.tight_layout()
+
+    return fig, axs
+
+
+
+def grad_vectors_compute_cdist(dataset, model_names):
+    """compute pair-wise distance to compare different random projection schemes
+
+        ```
+        from note_llama_embeddings import grad_vectors_compute_cdist
+        dataset = 'lima'
+        model_names = [
+            'pythia-160m',
+            'pythia-160m+lora:r=256:a=4096',
+            'pythia-160m+lora:r=512:a=11585',
+            'pythia-160m+lora:r=512:a=11585+proj=1024',
+            'pythia-160m+lora:r=512:a=11585+proj=4096',
+            'pythia-160m+lora:r=512:a=11585+proj=8192',
+        ]
+        grad_vectors_compute_cdist(dataset, model_names)
+        ```
+    """
+
+    for model_name in model_names:
+        sizes = {}
+        Ds = {}
+
+        save_path = os.path.join('model_outputs', 'sft', model_name, f'{dataset}.pkl')
+        with open(save_path, 'rb') as f:
+            o = pickle.load(f)
+            for k in [x for x in o.keys() if x.startswith('grad') and 'l2n' not in x]:
+                print(f'Computing distance for {k} of size {o[k].shape}')
+                Ds[k] = torch_cdist_chunked(o[k], device='cuda', chunk_size='auto', mem_total=12)
+                sizes[k] = o[k].shape
+            del o
+
+        save_path = os.path.join('model_outputs', 'sft', model_name, f'{dataset}_dist.pkl')
+        with open(save_path, 'wb') as f:
+            output = {'Ds': Ds, 'sizes': sizes}
+            pickle.dump(output, f)
+
+
+
+
+def get_grad_vectors_cdist(dataset, model_names):
+    """Gather results from `grad_vectors_compute_cdist`
+        
+        ```
+        from note_llama_embeddings import get_grad_vectors_cdist
+        dataset = 'lima'
+        model_names = [
+            'pythia-160m',
+            'pythia-160m+lora:r=256:a=4096',
+            'pythia-160m+lora:r=512:a=11585',
+            'pythia-160m+lora:r=512:a=11585+proj=1024',
+            'pythia-160m+lora:r=512:a=11585+proj=4096',
+            'pythia-160m+lora:r=512:a=11585+proj=8192',
+        ]
+        Ds, df = get_grad_vectors_cdist(dataset, model_names)
+        ```
+    """
+    Ds = {}
+    sizes = {}
+    for model_name in model_names:
+        match = re.search(r'r=(\d+)', model_name)
+        lora_rank = int(match.group(1)) if match else None
+        match = re.search(r'a=(\d+)', model_name)
+        lora_alpha = int(match.group(1)) if match else None
+        match = re.search(r'proj=(\d+)', model_name)
+        proj = int(match.group(1)) if match else 2048
+
+        save_path = os.path.join('model_outputs', 'sft', model_name, f'{dataset}_dist.pkl')
+        with open(save_path, 'rb') as f:
+            o = pickle.load(f)
+            o_Ds = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}' if lora_rank else k: v for k, v in o['Ds'].items()}
+            o_sizes = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}' if lora_rank else k: v for k, v in o['sizes'].items()}
+            if lora_rank is None:
+                o_Ds = {k: v for k, v in o_Ds.items() if k in ['grad_qkv', 'grad_rp_qkv']}
+                o_sizes = {k: v for k, v in o_sizes.items() if k in ['grad_qkv', 'grad_rp_qkv']}
+            Ds.update(o_Ds)
+            sizes.update(o_sizes)
+
+    ## flatten & select non-identical pairs.
+    nonzero = Ds['grad_qkv']!=0
+    for k in list(Ds.keys()):
+        v = Ds[k]
+        Ds[k] = v[nonzero].ravel()
+
+
+    statistics = []
+    for k, D in Ds.items():
+        if k == 'grad_qkv':
+            continue
+        rates = Ds[k] / Ds['grad_qkv']
+        statistics.append({
+            'name': k,
+            'shape': sizes[k],
+            'rates_mean': np.mean(rates),
+            'rates_std': np.std(rates),
+        })
+
+    df = pd.DataFrame(statistics)
+    def parse_params_fn(name):
+        match = re.search(r'r=(\d+)', name)
+        lora_rank = int(match.group(1)) if match else None
+        match = re.search(r'a=(\d+)', name)
+        lora_alpha = int(match.group(1)) if match else None
+        match = re.search(r'p=(\d+)', name)
+        proj = int(match.group(1)) if match else 2048
+
+        return {'lora_rank': lora_rank,
+                'lora_alpha': lora_alpha,
+                'proj': proj,
+               }
+    df = df.join(pd.DataFrame(list(df['name'].apply(parse_params_fn))))
+    
+    return Ds, df
+
+
+def plt_rates_std_vs_projected_dim(df):
+    """Visualize effects of JLT projected dimension & Lora rank on pairwise distance ratio std.
+    
+        ```
+        from note_llama_embeddings import get_grad_vectors_cdist, plt_rates_std_vs_projected_dim
+        dataset = 'lima'
+        model_names = [
+            'pythia-160m',
+            'pythia-160m+lora:r=256:a=4096',
+            'pythia-160m+lora:r=512:a=11585',
+            'pythia-160m+lora:r=512:a=11585+proj=1024',
+            'pythia-160m+lora:r=512:a=11585+proj=4096',
+            'pythia-160m+lora:r=512:a=11585+proj=8192',
+        ]
+        Ds, df = get_grad_vectors_cdist(dataset, model_names)
+        title = f"{dataset}:{model_names[0]}"
+        fig, ax = plt_rates_std_vs_projected_dim(df)
+        fig.suptitle(title)
+        ```
+    """
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(1,1,figsize=(8,5))
+
+    dft = df[df['name']=='grad_rp_qkv']
+    xs = dft['proj']
+    ys = dft['rates_std']
+    ax.plot(xs, ys, '.-', label='grad_rp_qkv')
+
+    dft = df[df['name'].apply(lambda x: 'grad_rp_loraB_' in x)]
+    for k, dfg in dft.groupby('lora_rank'):
+        dfg = dfg.sort_values(['proj'])
+        xs = dfg['proj']
+        ys = dfg['rates_std']
+        ax.plot(xs, ys, '.-', label=f'lora_r={int(k)}')
+
+    ax.set_ylabel('pairwise dist ($\pi dL/dL$) ratio std')
+    ax.set_xlabel('JLT projected dim')
+    ax.set_xticks([1024, 2048, 4096, 8192])
+    ax.set_ylim(bottom=0.03)
+
+    fig.legend(loc='center right')
+
+    return fig, ax
 
 
 def encode_just_one_role(example, tokenizer, max_seq_length, encode_fn_type, add_eos_token):
