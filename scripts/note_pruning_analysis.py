@@ -449,7 +449,26 @@ def save_text_viz_for_curriculum(path):
 
 
 
+def get_tokenizer_name_or_path(model_name):
 
+    if model_name.startswith('llama-7b'):
+        tokenizer_name_or_path = os.path.join(
+            scripts_dir, 'results', 'baselines', 'huggyllama/llama-7b')
+    elif model_name.startswith('codellama-7b'):
+        tokenizer_name_or_path = os.path.join(
+            scripts_dir, 'results', 'baselines', 'codellama/CodeLlama-7b-hf')
+    elif model_name.startswith('mistral-7b'):
+        tokenizer_name_or_path = os.path.join(
+            scripts_dir, 'results', 'baselines', 'mistralai/Mistral-7B-Instruct-v0.1')
+    elif model_name.startswith('llama2-7b'):
+        tokenizer_name_or_path = os.path.join(
+            scripts_dir, 'results', 'baselines', 'NousResearch/Llama-2-7b-hf')
+    else:
+        raise ValueError(f'Cannot find corresponding `tokenizer_name_or_path` for model_name: {model_name}')
+    
+    return tokenizer_name_or_path
+    
+    
 
 
 def get_fast_tokenizer(model_name_or_path):
@@ -752,4 +771,35 @@ def get_alpacafarm_generations(save_dirs, filter_fn_name=None, task='alpacafarm_
 
     return df
 
+
+
+
+
+
+
+md_to_model_name = {
+    'mpnet': 'all-mpnet-base-v2',
+    'bge': 'bge-large-en-v1.5',
+    'llama7b': 'llama-7b+lora:r=256:a=256',
+    'llama2:7b': 'llama2-7b+lora:r=256:a=256',
+    'codellama7b': 'codellama-7b+lora:r=256:a=256',
+    'mistral7b': 'mistral-7b+lora:r=256:a=256',
+    'llama7b+lima': 'llama-7b+lima+lora:r=256:a=256',
+}
+
+# after fixed bug in lora init -> unbiased pairwise distance.
+# try different projection dimension (default 2048)
+md_to_model_name.update({
+    'llama7br256p4096': 'llama-7b+lora:r=256:a=4096+proj=4096',
+    'llama7br512p4096': 'llama-7b+lora:r=512:a=11585+proj=4096',
+    'pythia1br512p4096': 'pythia-1b+lora:r=512:a=11585+proj=4096',
+})
+
+
+def get_full_model_name(md):
+    if md in md_to_model_name:
+        model_name = md_to_model_name[md]
+    else:
+        raise ValueError(f'Dont know full name for model_name: {md}')
+    return model_name
 

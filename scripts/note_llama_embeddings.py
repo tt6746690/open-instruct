@@ -242,12 +242,13 @@ def get_grad_vectors_cdist(dataset, model_names, compute_dist_with_normalized_ve
         lora_alpha = int(match.group(1)) if match else None
         match = re.search(r'proj=(\d+)', model_name)
         proj = int(match.group(1)) if match else 2048
+        base_model = model_name.split('+')[0]
 
         save_path = os.path.join('model_outputs', 'sft', model_name, f'{dataset}_dist.pkl')
         with open(save_path, 'rb') as f:
             o = pickle.load(f)
-            o_Ds = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}' if lora_rank else k: v for k, v in o[Ds_key].items()}
-            o_sizes = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}' if lora_rank else k: v for k, v in o['sizes'].items()}
+            o_Ds = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}_md={base_model}' if lora_rank else k: v for k, v in o[Ds_key].items()}
+            o_sizes = {f'{k}_r={lora_rank}_a={lora_alpha}_p={proj}_md={base_model}' if lora_rank else k: v for k, v in o['sizes'].items()}
             if lora_rank is None:
                 o_Ds = {k: v for k, v in o_Ds.items() if k in ['grad_qkv', 'grad_rp_qkv']}
                 o_sizes = {k: v for k, v in o_sizes.items() if k in ['grad_qkv', 'grad_rp_qkv']}
@@ -265,7 +266,7 @@ def get_grad_vectors_cdist(dataset, model_names, compute_dist_with_normalized_ve
     for k, D in Ds.items():
         if k == base_vector_name:
             continue
-        rates = Ds[k] / Ds[base_vector_name]
+        rates = D / Ds[base_vector_name]
         statistics.append({
             'name': k,
             'shape': sizes[k],
@@ -281,11 +282,15 @@ def get_grad_vectors_cdist(dataset, model_names, compute_dist_with_normalized_ve
         lora_alpha = int(match.group(1)) if match else None
         match = re.search(r'p=(\d+)', name)
         proj = int(match.group(1)) if match else 2048
+        match = re.search(r'md=([\w-]+)', name)
+        base_model = match.group(1) if match else None
 
-        return {'lora_rank': lora_rank,
-                'lora_alpha': lora_alpha,
-                'proj': proj,
-               }
+        return {
+            'base_model': base_model,
+            'lora_rank': lora_rank,
+            'lora_alpha': lora_alpha,
+            'proj': proj,
+        }
     df = df.join(pd.DataFrame(list(df['name'].apply(parse_params_fn))))
     
     return Ds, df
