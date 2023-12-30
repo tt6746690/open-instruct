@@ -25,8 +25,8 @@ sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/externa
 from dpp import dpp
 
 from note_pruning_analysis import get_lm_output, get_dataset, scripts_dir, get_tokenizer_name_or_path, get_fast_tokenizer
-from note_pruning_analysis import md_to_model_name, get_full_model_name
-
+from note_pruning_analysis import md_to_model_name, get_full_model_name, curriculum_dir
+from note_curriculum import get_curriculum_scores
 
 
 
@@ -342,13 +342,22 @@ def torch_dppmap_memefficient(Ki_fn,
                               Kd_fn,
                               N,
                               M,
+                              J=None,
                               epsilon=1e-10,
                               verbose=True,
                               save_dir=None,
                               save_freq=None):
     """dpp map inference 
             - https://arxiv.org/pdf/1709.05135.pdf
+
+        if `J` specified, 
+            then instead of picking j greedily,
+            just use `j\in J` at each step.
+            This is to compute the marginal gain of arbitrary ordering `J`
     """
+    if J is not None and len(J) < M:
+        raise ValueError(f'len(J)={len(J)} < M={M}')
+
     if save_dir is not None:
         state_save_path = os.path.join(save_dir, 'DppMapState.pkl')
     else:
@@ -358,7 +367,10 @@ def torch_dppmap_memefficient(Ki_fn,
         state = DppMapState()
         state.cis = torch.zeros((M, N), dtype=torch.float32)
         state.di2s = Kd_fn()
-        j = torch.argmax(state.di2s).item()
+        if J is None:
+            j = torch.argmax(state.di2s).item()
+        else:
+            j = J[0]
         state.inds.append(j)
         state.marginal_gains.append(state.di2s[j].item())
         start_iteration = 0
@@ -383,7 +395,10 @@ def torch_dppmap_memefficient(Ki_fn,
         state.cis[k, :] = eis
         state.di2s -= torch.square(eis)
         state.di2s[j] = -float('inf')
-        j = torch.argmax(state.di2s).item()
+        if J is None:
+            j = torch.argmax(state.di2s).item()
+        else:
+            j = J[k+1]
 
         if state.di2s[j] < epsilon:
             if verbose:
@@ -421,13 +436,13 @@ def Kd_fn_full(kernel_fn, X, Q):
     return Kd
 
 
-def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None, save_dir=None):
+def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=None, Y=None, save_dir=None):
     N = len(X)
     max_length = min(N, max_length)
     if dppmap_type == 'dppmap':
         Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
         Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
-        output = torch_dppmap_memefficient(Ki_fn, Kd_fn, N, max_length, verbose=True, save_dir=save_dir, save_freq=int(max_length//10))
+        output = torch_dppmap_memefficient(Ki_fn, Kd_fn, N, max_length, J=J, verbose=True, save_dir=save_dir, save_freq=max(int(max_length//10), 5_000))
     elif dppmap_type == 'dppmapbd': # block diagonal
         clusters = sorted(list(torch.unique(Y).cpu().numpy()))
         inds_list = []
@@ -438,13 +453,14 @@ def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=None, save_dir=None
             inds_global = np.nonzero(mask.reshape(-1).to('cpu').numpy())[0]
             Xi = X[mask]
             Qi = Q[mask]
+            Ji = J[mask]
             Ni = Xi.shape[0]
             if Ni <= 10: continue
             Mi = min(Ni, max_length) # max_length, just take all 
             Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=Xi, Q=Qi)
             Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=Xi, Q=Qi)
             inds, marginal_gains = torch_dppmap_memefficient(
-                Ki_fn, Kd_fn, Ni, Mi, verbose=True)
+                Ki_fn, Kd_fn, Ni, Mi, J=Ji, verbose=True)
             inds = inds_global[np.array(inds)].tolist()
             inds_list += inds
             marginal_gains_list += marginal_gains
@@ -481,6 +497,7 @@ def normalize_to_unit_interval(Q, quantile_to_0=0.01, quantile_to_1=0.99):
     return Q
 
 
+
 def compute_dppmap(
     dppmap_type,
     dataset,
@@ -494,6 +511,7 @@ def compute_dppmap(
     max_length,
     device,
     run_name,
+    prespecified_ordering=None, # preset subset ordering (instead of greedy)
     Y=None, # cluster assignments
 ):  
     """
@@ -592,6 +610,16 @@ def compute_dppmap(
     if Y is not None:
         Y = torch.from_numpy(Y.reshape(-1)).to(device)
 
+    if prespecified_ordering is not None:
+        model_name = get_full_model_name(kernel_embed_model)
+        curriculum_scores = os.path.join(curriculum_dir, model_name, dataset, prespecified_ordering, 'scores.pkl')
+        if not os.path.isfile(curriculum_scores):
+            raise ValueError(f'curriculum_scores={curriculum_scores} does not exists!')
+        output = get_curriculum_scores(curriculum_scores)
+        scores = output['scores']
+        J = np.argsort(scores).tolist()
+
+
     N = X.shape[0]
     if not X.shape[0] == Q.numel():
         raise ValueError(f'X ({X.shape}) and Q ({Q.shape}) does not match')
@@ -613,7 +641,7 @@ def compute_dppmap(
     os.makedirs(save_dir, exist_ok=True)
 
     t0 = time.time()
-    inds, marginal_gains = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, Y=Y, save_dir=save_dir)
+    inds, marginal_gains = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=J, Y=Y, save_dir=save_dir)
     info['M'] = len(inds)
     info["time_elapsed"] = time.time()-t0
 

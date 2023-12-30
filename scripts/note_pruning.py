@@ -89,6 +89,7 @@ def sort_kmeans_dist_to_cluster_centers(X, n_clusters, kmeans_type='minibatch_km
 
 def parse_sort_by_and_compute_dppmap(sort_by, dataset):
     kvs = parse_kv_from_string(sort_by)
+
     if kvs['k'] == 'vmf':
         kernel_kwargs = {'gamma': kvs['gamma']}
     elif kvs['k'] == 'rbf':
@@ -103,6 +104,19 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
     else:
         max_length = 20_000
 
+    prespecified_ordering = re.sub(':', '_', re.sub('@', '=', kvs['ord'])) if 'ord' in kvs else None
+    if prespecified_ordering:
+        ## just run for target_size
+        assert('auto' in kvs['gamma'])
+        match = re.search(r'auto([\d.e+-]+)', sort_by)
+        max_length = int(match.group(1))
+        ## fetch prev run autotune-ed gamma, and use it for this run
+        kvs_ = {k: v for k, v in kvs.items() if k not in [0, 'ord']}
+        sort_by_without_ord = kvs[0]+'_'+create_string_from_kv(kvs_)
+        d = get_dppmap_autotune_gamma_search_result(sort_by_without_ord, dataset)
+        kernel_kwargs = {'gamma': d['gamma']}
+        sort_by = re.sub(r'auto\d+', str(d['gamma']), sort_by)
+
     kwargs = {
         'dppmap_type': 'dppmap',
         'dataset': dataset,
@@ -115,10 +129,28 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
         'theta': kvs.get('theta', 0.), # defaults to just diversity no quality
         'device': 'cuda',
         'max_length': max_length, # balance finish job within 6 hrs with wanting to prune a lot. meaning resulting scores will only be valid up to 20k for large datasets.
+        'prespecified_ordering': prespecified_ordering,
         'run_name': sort_by,
     }
     print(f'Calling note_pruning_dpp.compute_dppmap with kwargs={json.dumps(kwargs, indent=4)}')
     return note_pruning_dpp.compute_dppmap(**kwargs)
+
+
+
+def get_dppmap_autotune_gamma_search_result(sort_by, dataset, rel_tol=0.01):
+    
+    match = re.search(r'gamma=auto([\d.e+-]+)', sort_by)
+    target_size = int(match.group(1))
+
+    df = note_pruning_dpp.get_dppmap_run_info(
+        re.sub('gamma=auto([\d.e+-]+)', 'gamma=*', sort_by),
+        dataset)
+    M_closest, gamma_closest = df.loc[(df['M']-target_size).abs().idxmin()][['M', 'gamma']]
+    if np.abs(((M_closest-target_size)/target_size)) < rel_tol:
+        print(f'[autotune gamma result] Found gamma={gamma_closest} / M={M_closest} '
+              f'is within {rel_tol} of target_size={target_size}')
+    d = df.loc[(df['M']-target_size).abs().idxmin()].to_dict()
+    return d
 
 
 
@@ -129,8 +161,6 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
         max_iterations=20,
     ):
     """run dppmap, but auto-tunes `gamma` to reach target_size. """
-    
-    from note_pruning_dpp import get_dppmap_run_info
 
     match = re.search(r'gamma=auto([\d.e+-]+)', sort_by)
     target_size = int(match.group(1))
@@ -146,7 +176,7 @@ def parse_sort_by_and_compute_dppmap_autotune_gamma(
         # 
         
         ## Initialize `gamma`
-        df = get_dppmap_run_info(
+        df = note_pruning_dpp.get_dppmap_run_info(
             re.sub('gamma=auto([\d.e+-]+)', 'gamma=*', sort_by), 
             dataset)
         d = df[['gamma', 'M']].to_dict(orient='list')
