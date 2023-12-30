@@ -28,6 +28,26 @@ from open_instruct.finetune_trainer import encode_with_prompt_completion_format,
 
 
 
+from sklearn.random_projection import SparseRandomProjection
+class TorchSparseRandomProjection(SparseRandomProjection):
+    
+    # overrrides https://github.com/scikit-learn/scikit-learn/blob/3f89022fa04d293152f1d32fbc2a5bdaaf2df364/sklearn/random_projection.py#L810C16-L810C86
+    def transform(self, X):
+        device = 'cuda'
+        X = torch.from_numpy(X).to(device)
+        if hasattr(self, 'Pt_'):
+            Pt = self.Pt_
+        else:
+            Pt = self.components_.transpose().tocsr()
+            Pt = torch.sparse_csr_tensor(torch.from_numpy(Pt.indptr),
+                                         torch.from_numpy(Pt.indices),
+                                         torch.from_numpy(Pt.data),)
+            Pt = Pt.to(device)
+            self.Pt_ = Pt
+        XPt = X @ Pt
+        XPt = XPt.to('cpu').numpy()
+        return XPt
+
 
 
 def torch_cdist(X, device):
@@ -899,7 +919,7 @@ def compute_lm_outputs(
                     for k, v in grad_embeddings.items():
                         t0 = time.time()
                         if 'rsum' not in k:
-                            rps[k] = SparseRandomProjection(n_components=grad_randproj_components, random_state=0)
+                            rps[k] = TorchSparseRandomProjection(n_components=grad_randproj_components, random_state=0)
                         else:
                             rps[k] = GaussianRandomProjection(n_components=grad_randproj_components, random_state=0)
                         print(f"Fitting random projection for {k} ({v.size} -> {grad_randproj_components})")
