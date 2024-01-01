@@ -709,15 +709,36 @@ def convert_lima_data(data_dir, output_dir, num_examples=None):
             }) + "\n")
 
 
-def convert_wizardlm_data(data_dir, output_dir, num_examples=30000):
+def convert_wizardlm_data(data_dir, output_dir, num_examples=30000, version='wizardlm'):
+    """
+        ```
+        from note_pruning_analysis import filter_json_by_numtoks
+        from open_instruct.reformat_datasets import convert_wizardlm_data
+        data_dir = 'data/raw_train/wizardlm'
+        output_dir = 'data/processed/wizardlm'
+        dataset = 'wizardlmv2'
+        convert_wizardlm_data(data_dir, output_dir, num_examples=None, version=dataset)
+        print(f"Filtering {dataset} to max_seq_length=2048...")
+        filepath = os.path.join(output_dir, f"{dataset}_data.jsonl")
+        filter_json_by_numtoks(filepath, max_seq_length=2048)
+        ```
+        wizardlm: original dataset
+        wizardlmv2: truncate to 2048 max tokens.
+    """
     os.makedirs(output_dir, exist_ok=True)
+
     examples = []
     with open(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json"), "r") as fin:
         examples = json.load(fin)
     if num_examples:
         examples = random.sample(examples, k=num_examples)
 
-    output_path = os.path.join(output_dir, "wizardlm_data.jsonl")
+    if version == 'wizardlm':
+        output_path = os.path.join(output_dir, "wizardlm_data.jsonl")
+    elif version == 'wizardlmv2':
+        output_path = os.path.join(output_dir, "wizardlmv2_data.jsonl")
+    else:
+        raise ValueError(f"Unknown version: {version}")
     with open(output_path, "w") as fout:
         for idx, example in enumerate(examples):
             messages = []
@@ -741,18 +762,18 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000):
 
 
 
-def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gpt35_examples=0, convert_extra_data=False):
+def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gpt35_examples=0, version='open_orca'):
     """
         ```
         from open_instruct.reformat_datasets import convert_open_orca_data
         data_dir = 'data/raw_train/open_orca'
         output_dir = 'data/processed/open_orca'
-        convert_open_orca_data(data_dir, output_dir, convert_extra_data=True)
+        convert_open_orca_data(data_dir, output_dir, version='open_orca_slim')
         ```
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    if not convert_extra_data:
+    if version == 'open_orca':
         examples = []
 
         df = pd.read_parquet(os.path.join(data_dir, "1M-GPT4-Augmented.parquet"))    
@@ -780,7 +801,7 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
                     "messages": messages,
                 }) + "\n")
 
-    else:
+    elif open_orca == 'open_orca_slim':
         ## wpq: open_orca_slim
         examples = [] 
         with open(os.path.join(data_dir, "oo-labeled_correct.gpt4.sharegpt.jsonl"), "r") as f:
@@ -827,12 +848,43 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
 
 
 def convert_ultrachat_data(data_dir, output_dir, version='ultrachat200k'):
+    """
+
+        ultrachat200k: originnal dataset split long conv, without discarding long conv examples properly.
+        ultrachat200kv2: split & discard long conv! 
+            - since discard long conv, don't need to filter examples to <2048 tokens.
+        
+            python split_sharegpt_conversations.py \
+                --in-files HuggingFaceH4/ultrachat_200k_train \
+                --out-file data/raw_train/ultrachat/ultrachat200k_train_2048_discardlongconv.json \
+                --model-name-or-path results/baselines/huggyllama/llama-7b \
+                --max-length 2048 \
+                --special_tok_len 8
+
+            python split_sharegpt_conversations.py \
+                --in-files HuggingFaceH4/ultrachat_200k_test \
+                --out-file data/raw_train/ultrachat/ultrachat200k_test_2048_discardlongconv.json \
+                --model-name-or-path results/baselines/huggyllama/llama-7b \
+                --max-length 2048 \
+                --special_tok_len 8
+        ```
+        from open_instruct.reformat_datasets import convert_ultrachat_data
+        data_dir = 'data/raw_train/ultrachat'
+        output_dir = 'data/processed/ultrachat'
+        dataset = 'ultrachat200kv2'
+        convert_ultrachat_data(data_dir, output_dir, version=dataset)
+        print(f"Filtering {dataset} to max_seq_length=2048...")
+        filepath = os.path.join(output_dir, f"{dataset}_data.jsonl")
+        filter_json_by_numtoks(filepath, max_seq_length=2048)
+        ```
+    
+    """
     from datasets import load_dataset, concatenate_datasets
 
     if version == 'ultrachat200k':
         # ds = load_dataset('HuggingFaceH4/ultrachat_200k', cache_dir=data_dir, split='train_sft')
         data_files = {'train': os.path.join(data_dir, 'ultrachat_200k_train_splitlongconv.json'),
-                    'test': os.path.join(data_dir, 'ultrachat_200k_test_splitlongconv.json')}
+                      'test': os.path.join(data_dir, 'ultrachat_200k_test_splitlongconv.json')}
         
         for split in ['train', 'test']:
             ds = load_dataset('json', data_files=data_files, split=split, cache_dir=data_dir)
@@ -848,6 +900,25 @@ def convert_ultrachat_data(data_dir, output_dir, version='ultrachat200k'):
             ds =  ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
             
             output_path = os.path.join(output_dir, f'ultrachat200k_{split}_data.jsonl')
+            ds.to_json(output_path)
+    elif version == 'ultrachat200kv2':
+        data_files = {'train': os.path.join(data_dir, 'ultrachat200k_train_2048_discardlongconv.json'),
+                      'test': os.path.join(data_dir, 'ultrachat200k_test_2048_discardlongconv.json')}
+        
+        for split in ['train', 'test']:
+            ds = load_dataset('json', data_files=data_files, split=split, cache_dir=data_dir)
+            # splitting conversations removes "prompt" already.
+            ds = ds.remove_columns(["prompt_id"])
+            def add_metadata_fn(example, idx):
+                example.update({'dataset': 'ultrachat', 'id': f'ultrachat_{idx}'})
+                return example
+            ds = ds.map(add_metadata_fn, 
+                        with_indices=True, 
+                        num_proc=10)
+            # re-ordering the features
+            ds =  ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
+            
+            output_path = os.path.join(output_dir, f'ultrachat200kv2_{split}_data.jsonl')
             ds.to_json(output_path)
     elif version == 'ultrachat15':
         data_files = {f'train_{i}': os.path.join(data_dir, 'full_splitlongconv_2048', f'train_{i}.jsonl') 

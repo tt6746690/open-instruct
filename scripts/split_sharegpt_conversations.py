@@ -2,11 +2,13 @@
 This script is largely copied from the Vicuna repo: https://github.com/lm-sys/FastChat/blob/main/fastchat/data/split_long_conversation.py
 We fixed a bug in `split_one_sample`, which previously includes long conversations in the processed data. Now we skip these long conversations.
 """
+import pyarrow
 import argparse
 from concurrent.futures import ProcessPoolExecutor
 import json
 import transformers
 from tqdm import tqdm
+
 
 
 def make_sample(sample, start_idx, end_idx):

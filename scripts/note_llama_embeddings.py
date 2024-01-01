@@ -792,6 +792,8 @@ def compute_lm_outputs(
         train_file = os.path.join(processed_dir, 'open_orca', f'{dataset}_data.jsonl')
     elif 'sharegpt' in dataset:
         train_file = os.path.join(processed_dir, 'sharegpt', f'{dataset}_data.jsonl')
+    elif 'wizardlm' in dataset:
+        train_file = os.path.join(processed_dir, 'wizardlm', f'{dataset}_data.jsonl')
     elif 'starcoder' in dataset:
         train_file = os.path.join(processed_dir, 'starcoder', f'{dataset}.jsonl')
     else:
@@ -919,7 +921,7 @@ def compute_lm_outputs(
                     for k, v in grad_embeddings.items():
                         t0 = time.time()
                         if 'rsum' not in k:
-                            rps[k] = TorchSparseRandomProjection(n_components=grad_randproj_components, random_state=0)
+                            rps[k] = SparseRandomProjection(n_components=grad_randproj_components, random_state=0)
                         else:
                             rps[k] = GaussianRandomProjection(n_components=grad_randproj_components, random_state=0)
                         print(f"Fitting random projection for {k} ({v.size} -> {grad_randproj_components})")

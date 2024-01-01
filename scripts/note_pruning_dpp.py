@@ -618,6 +618,8 @@ def compute_dppmap(
         output = get_curriculum_scores(curriculum_scores)
         scores = output['scores']
         J = np.argsort(scores).tolist()
+    else:
+        J = None
 
 
     N = X.shape[0]

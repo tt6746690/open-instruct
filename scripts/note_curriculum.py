@@ -8,13 +8,11 @@ import itertools
 import numpy as np
 
 
-from note_pruning import save_to_pickle
-from note_pruning_analysis import curriculum_dir
+from note_pruning_analysis import curriculum_dir, save_to_pickle, get_sorted_inds
 
 
 
 def convert_existing_data_inds_to_curriculum_scores():
-    from note_pruning_analysis import get_sorted_inds
 
     paths = glob.glob('data_inds/*/*/*.pkl')
     paths = [x for x in paths if 'incr' in x and 'pythia' not in x]

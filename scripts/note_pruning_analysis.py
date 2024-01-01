@@ -36,6 +36,12 @@ curriculum_dir = os.path.join(scripts_dir, 'curriculum')
 
 
 
+def save_to_pickle(save_path, output):
+    if 'inds' in output:
+        print(f'save inds (length = {len(output["inds"])}) to {save_path}')
+    with open(save_path, 'wb') as f:
+        pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
 def get_dataset_size(data_dir = 'data/processed'):
     """
         ```
@@ -80,7 +86,7 @@ def get_dataset(dataset, processed=True):
             elif 'flan2022' in dataset:
                 train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
             elif 'ultrachat' in dataset:
-                if dataset == 'ultrachat200k':
+                if dataset.startswith('ultrachat200k'):
                     train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_train_data.jsonl')
                 else:
                     train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
@@ -90,6 +96,8 @@ def get_dataset(dataset, processed=True):
                 train_file = os.path.join(processed_dir, 'open_orca', f'{dataset}_data.jsonl')
             elif 'sharegpt' in dataset:
                 train_file = os.path.join(processed_dir, 'sharegpt', f'{dataset}_data.jsonl')
+            elif 'wizardlm' in dataset:
+                train_file = os.path.join(processed_dir, 'wizardlm', f'{dataset}_data.jsonl')
             else:
                 train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
         else:

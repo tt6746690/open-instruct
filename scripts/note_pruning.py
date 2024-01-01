@@ -11,19 +11,14 @@ import torch
 from transformers import AutoTokenizer
 
 from rosemary import parse_kv_from_string, create_string_from_kv
-from note_pruning_analysis import lm_output_dir, get_dataset_token_lengths, save_text_viz_for_curriculum, get_tokenizer_name_or_path, get_fast_tokenizer
+from note_pruning_analysis import lm_output_dir, get_dataset_token_lengths, save_text_viz_for_curriculum, get_tokenizer_name_or_path, get_fast_tokenizer, save_to_pickle
+from note_pruning_analysis import get_lm_output, md_to_model_name, get_full_model_name
+
 import note_pruning_dpp
 import note_pruning_clustering
 
-from note_pruning_analysis import get_lm_output, md_to_model_name, get_full_model_name
 
 
-
-def save_to_pickle(save_path, output):
-    if 'inds' in output:
-        print(f'save inds (length = {len(output["inds"])}) to {save_path}')
-    with open(save_path, 'wb') as f:
-        pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def save_sorted_inds(save_dir, S, sort_by, reverse=False, extra=None):
