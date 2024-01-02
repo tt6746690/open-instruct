@@ -783,24 +783,6 @@ def compute_lm_outputs(
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
 
-    # processed_dir = '../data/processed'
-    # if 'flan2022' in dataset:
-    #     train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
-    # elif 'ultrachat' in dataset:
-    #     train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
-    # elif 'open_orca' in dataset:
-    #     train_file = os.path.join(processed_dir, 'open_orca', f'{dataset}_data.jsonl')
-    # elif 'sharegpt' in dataset:
-    #     train_file = os.path.join(processed_dir, 'sharegpt', f'{dataset}_data.jsonl')
-    # elif 'wizardlm' in dataset:
-    #     train_file = os.path.join(processed_dir, 'wizardlm', f'{dataset}_data.jsonl')
-    # elif 'starcoder' in dataset:
-    #     train_file = os.path.join(processed_dir, 'starcoder', f'{dataset}.jsonl')
-    # else:
-    #     train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
-    # assert(os.path.isfile(train_file))
-     
-
     if encode_fn_type in ['input', 'output']:
         encode_function = partial(
             encode_just_one_role,
@@ -821,11 +803,6 @@ def compute_lm_outputs(
 
 
     if rank == 0:
-        # raw_datasets = load_dataset("json", 
-        #                             data_files={'train': train_file},
-        #                             cache_dir=os.path.dirname(train_file))
-        # if test_run:
-        #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
         train_dataset = get_dataset(dataset, processed=True)
         print(f"{dataset} dataset length = {len(train_dataset)}")
         train_dataset = train_dataset.map(
@@ -834,19 +811,12 @@ def compute_lm_outputs(
     if use_dist:
         dist.barrier()
     if rank!= 0:
-        # raw_datasets = load_dataset("json", 
-        #                             data_files={'train': train_file},
-        #                             cache_dir=os.path.dirname(train_file))
-        # if test_run:
-        #     raw_datasets['train'] = raw_datasets['train'].select(range(100))
         train_dataset = get_dataset(dataset, processed=True)
         print(f"{dataset} dataset length = {len(train_dataset)}")
         train_dataset = train_dataset.map(
             encode_function, batched=False, num_proc=64,
             desc="Tokenizing and reformatting instruction data")
 
-
-    # train_dataset = lm_datasets['train']
         
     train_dataset.set_format(
         type="torch",
