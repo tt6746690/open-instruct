@@ -101,16 +101,17 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
 
     prespecified_ordering = re.sub(':', '_', re.sub('@', '=', kvs['ord'])) if 'ord' in kvs else None
     if prespecified_ordering:
-        ## just run for target_size
-        assert('auto' in kvs['gamma'])
-        match = re.search(r'auto([\d.e+-]+)', sort_by)
-        max_length = int(match.group(1))
-        ## fetch prev run autotune-ed gamma, and use it for this run
-        kvs_ = {k: v for k, v in kvs.items() if k not in [0, 'ord']}
-        sort_by_without_ord = kvs[0]+'_'+create_string_from_kv(kvs_)
-        d = get_dppmap_autotune_gamma_search_result(sort_by_without_ord, dataset)
-        kernel_kwargs = {'gamma': d['gamma']}
-        sort_by = re.sub(r'auto\d+', str(d['gamma']), sort_by)
+        if isinstance(kvs['gamma'], str) and 'auto' in kvs['gamma']:
+            ## just run for target_size
+            match = re.search(r'auto([\d.e+-]+)', sort_by)
+            max_length = int(match.group(1))
+            ## fetch prev run autotune-ed gamma, and use it for this run
+            kvs_ = {k: v for k, v in kvs.items() if k not in [0, 'ord']}
+            sort_by_without_ord = kvs[0]+'_'+create_string_from_kv(kvs_)
+            d = get_dppmap_autotune_gamma_search_result(sort_by_without_ord, dataset)
+            kernel_kwargs = {'gamma': d['gamma']}
+            sort_by = re.sub(r'auto\d+', str(d['gamma']), sort_by)
+        
 
     kwargs = {
         'dppmap_type': 'dppmap',

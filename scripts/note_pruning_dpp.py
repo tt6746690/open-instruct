@@ -22,11 +22,48 @@ import matplotlib.pyplot as plt
 
 import sys
 sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
-from dpp import dpp
+# from dpp import dpp
 
 from note_pruning_analysis import get_lm_output, get_dataset, scripts_dir, get_tokenizer_name_or_path, get_fast_tokenizer
 from note_pruning_analysis import md_to_model_name, get_full_model_name, curriculum_dir
 from note_curriculum import get_curriculum_scores
+
+
+def dpp(kernel_matrix, max_length, epsilon=1E-10):
+    """
+    Our proposed fast implementation of the greedy algorithm
+    :param kernel_matrix: 2-d array
+    :param max_length: positive int
+    :param epsilon: small positive scalar
+    :return: list
+    """
+    import math
+    item_size = kernel_matrix.shape[0]
+    cis = np.zeros((max_length, item_size))
+    di2s = np.copy(np.diag(kernel_matrix))
+    selected_items = list()
+    selected_item = np.argmax(di2s)
+    selected_items.append(selected_item)
+    marginal_gains = [di2s[selected_item]]
+    while len(selected_items) < max_length:
+        if len(selected_items)%(max_length//10)==0:
+            print('fast_map_dpp iterations = ',len(selected_items))
+        k = len(selected_items) - 1
+        ci_optimal = cis[:k, selected_item]
+        di_optimal = math.sqrt(di2s[selected_item])
+        elements = kernel_matrix[selected_item, :]
+        eis = (elements - np.dot(ci_optimal, cis[:k, :])) / di_optimal
+        cis[k, :] = eis
+        di2s -= np.square(eis)
+        di2s[selected_item] = -np.inf
+        selected_item = np.argmax(di2s)
+        if di2s[selected_item] < epsilon:
+            print(di2s[selected_item])
+            break
+        selected_items.append(selected_item)
+        marginal_gains.append(di2s[selected_item])
+    return selected_items, marginal_gains
+
 
 
 
@@ -114,13 +151,13 @@ def gauss_kernel(X, Y=None, sigma=1.0):
     return K
 
 
-def vmf_kernel(X, Y, gamma=1.0):
+def vmf_kernel(X, Y, gamma=1.0, alpha=1.0):
     """Computes exponentiated inner product kernel k(x,y)=exp(γ·x^Ty) """
     S = X@Y.T
     # ensure similarity >=0 (avoid the case where S<0 and yields a larger K)
     # range: [-1,1] -> [-1,0] so that max kernel value is 1 for exp(gamma*0)=1
     S = (S-1)/2
-    K = np.exp(gamma*S)
+    K = alpha*np.exp(gamma*S)
     return K
 
 def linear_kernel(X, Y):
@@ -180,8 +217,9 @@ def get_L(X, kernel_type):
     if kernel_type.startswith('cd'):
         L = (X@X.T+1)/2
     if kernel_type.startswith('vmf'):
-        gamma = float(re.search(r'gamma=([0-9.]+)', kernel_type).group(1))
-        L = vmf_kernel(X, X, gamma=gamma)
+        gamma = float(re.search(r'γ=([0-9.]+)', kernel_type).group(1))
+        alpha = float(re.search(r'α=([0-9.]+)', kernel_type).group(1))
+        L = vmf_kernel(X, X, gamma=gamma, alpha=alpha)
     elif kernel_type.startswith('rbf'):
         sigma = float(re.search(r'sigma=([0-9.]+)', kernel_type).group(1))
         L = gauss_kernel(X, sigma=sigma)
@@ -193,6 +231,7 @@ def get_L(X, kernel_type):
 
 def get_subset(L, subset_type, k):
     rng = RandomState(0)
+    info = {}
     if subset_type == 'random':
         np.random.seed(0)
         inds = np.random.choice(len(L), k).tolist()
@@ -203,18 +242,23 @@ def get_subset(L, subset_type, k):
         DPP = FiniteDPP(kernel_type='likelihood', projection=False,  L=L)
         inds = DPP.sample_exact(mode='Chol', random_state=rng)
     elif subset_type == 'dppmap':
-        inds = dpp(L, max_length=len(L))
+        inds, marginal_gains = dpp(L, max_length=len(L))
+        info['marginal_gains'] = marginal_gains
     else:
         raise ValueError(f'subset_type={subset_type} not implemented.')
-    return inds
+    return inds, info
 
 
-def plt_subsets(Is, data):
+def plt_subsets(Is, data, dppmap_states=None):
     X = data['X']
-    naxs = len(Is)
-    fig, axs = plt.subplots(2,naxs,figsize=(3*naxs,5), sharey='row',
-                            gridspec_kw={'height_ratios': [3, 1]})
-    for i in range(naxs):
+    ncols = len(Is)
+    nrows = 3 if dppmap_states is not None else 2
+    height_ratios = [3, 1, 3] if dppmap_states is not None else [3, 1]
+    h = 5 if nrows==2 else 8
+    fig, axs = plt.subplots(nrows,ncols,figsize=(3*ncols, h), sharey='row',
+                            gridspec_kw={'height_ratios': height_ratios})
+    axs = axs.reshape(nrows, -1)
+    for i in range(ncols):
         subset_type, inds = list(Is.items())[i]
         Xs = X[inds]
         ax = axs[0, i]
@@ -236,6 +280,15 @@ def plt_subsets(Is, data):
         H_θ = -np.sum(hist*np.log(hist+1e-10)*np.pi/bins) # integrate over [-pi/2, pi/2]
         H_uniform = np.log(np.pi)
         ax.set_xlabel(f'H(θ)={H_θ:.3f} (H(Unif(θ))={H_uniform:.3f})')
+
+        if dppmap_states is not None:
+            ax = axs[2, i]
+            di2s = dppmap_states[subset_type]
+            logdetL = np.sum(np.log(di2s))
+            ax.plot(np.log(di2s), label=f'di2s (logdetL={logdetL:.0f})')
+            ax.axhline(y=0, color='k', linestyle='--')
+            ax.legend()
+            # ax.set_yscale('log')
 
     fig.tight_layout()
     return fig, axs 
