@@ -217,11 +217,11 @@ def get_L(X, kernel_type):
     if kernel_type.startswith('cd'):
         L = (X@X.T+1)/2
     if kernel_type.startswith('vmf'):
-        gamma = float(re.search(r'γ=([0-9.]+)', kernel_type).group(1))
-        alpha = float(re.search(r'α=([0-9.]+)', kernel_type).group(1))
+        gamma = float(re.search(r'γ=([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)', kernel_type).group(1))
+        alpha = float(re.search(r'γ=([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)', kernel_type).group(1))
         L = vmf_kernel(X, X, gamma=gamma, alpha=alpha)
     elif kernel_type.startswith('rbf'):
-        sigma = float(re.search(r'sigma=([0-9.]+)', kernel_type).group(1))
+        sigma = float(re.search(r'sigma=([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)', kernel_type).group(1))
         L = gauss_kernel(X, sigma=sigma)
     else:
         raise ValueError(f'X ({X.shape}) with kernel_type={kernel_type} cannot compute L.')
@@ -255,7 +255,7 @@ def plt_subsets(Is, data, dppmap_states=None):
     nrows = 3 if dppmap_states is not None else 2
     height_ratios = [3, 1, 3] if dppmap_states is not None else [3, 1]
     h = 5 if nrows==2 else 8
-    fig, axs = plt.subplots(nrows,ncols,figsize=(3*ncols, h), sharey='row',
+    fig, axs = plt.subplots(nrows,ncols,figsize=(3*ncols, h), #sharey='row',
                             gridspec_kw={'height_ratios': height_ratios})
     axs = axs.reshape(nrows, -1)
     for i in range(ncols):
@@ -997,7 +997,7 @@ def get_dppmap_run_info(filename, dataset):
     def get_sort_by_fn(r):
         match = re.search(r'gamma=([\d.e+-]+)', r['filename'])
         if match:
-            return r['filename'].replace(match.group(1), '([\d.e+-]+)')
+            return r['filename'].replace('gamma='+match.group(1), 'gamma=([\d.e+-]+)')
         else:
             return None
     df['sort_by'] = df.apply(get_sort_by_fn, axis=1)

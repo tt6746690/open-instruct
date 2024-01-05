@@ -137,7 +137,6 @@ def get_dppmap_autotune_gamma_search_result(sort_by, dataset, rel_tol=0.01):
     
     match = re.search(r'gamma=auto([\d.e+-]+)', sort_by)
     target_size = int(match.group(1))
-
     df = note_pruning_dpp.get_dppmap_run_info(
         re.sub('gamma=auto([\d.e+-]+)', 'gamma=*', sort_by),
         dataset)
@@ -145,8 +144,11 @@ def get_dppmap_autotune_gamma_search_result(sort_by, dataset, rel_tol=0.01):
     if np.abs(((M_closest-target_size)/target_size)) < rel_tol:
         print(f'[autotune gamma result] Found gamma={gamma_closest} / M={M_closest} '
               f'is within {rel_tol} of target_size={target_size}')
-    d = df.loc[(df['M']-target_size).abs().idxmin()].to_dict()
-    return d
+        d = df.loc[(df['M']-target_size).abs().idxmin()].to_dict()
+        return d
+    else:
+        raise ValueError(f'[autotune gamma result] gamma={gamma_closest} / M={M_closest} '
+                         f'is NOT within {rel_tol} of target_size={target_size}')
 
 
 
