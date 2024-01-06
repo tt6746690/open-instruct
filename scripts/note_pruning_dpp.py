@@ -21,8 +21,6 @@ from transformers import AutoTokenizer
 import matplotlib.pyplot as plt
 
 import sys
-sys.path.insert(0, "/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/fast-map-dpp")
-# from dpp import dpp
 
 from note_pruning_analysis import get_lm_output, get_dataset, scripts_dir, get_tokenizer_name_or_path, get_fast_tokenizer
 from note_pruning_analysis import md_to_model_name, get_full_model_name, curriculum_dir

@@ -151,5 +151,9 @@ echo "Downloading the HardCoded dataset..."
 wget -P data/raw_train/hard_coded/ https://beaker.org/api/v3/datasets/01HBS14BBV16K45MMFSYJR86CA/files/hard_coded_examples.xlsx
 
 
+echo "Downloading Alpagasus dataset..."
+wget -P data/raw_train/alpagasus https://raw.githubusercontent.com/gpt4life/alpagasus/main/data/filtered/chatgpt_9k.json
+
+
 echo "Processing datasets..."
 python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/

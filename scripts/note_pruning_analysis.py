@@ -183,6 +183,53 @@ def get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embeddi
     return output
 
 
+
+def random_uniform_hypersphere_surface(N, D):
+    v = np.random.randn(N, D)
+    v /= np.linalg.norm(v, axis=1, keepdims=True)
+    return v
+
+
+
+def generate_randsphere_model_output(dataset, D, model_name='randspherep4096'):
+    """Generate uniformlys sampled points on hypersphere surface
+        to `model_outputs` under `randsphere`
+
+        ```
+        from note_pruning_analysis import generate_randsphere_model_output
+        dataset_list = [
+            'stanford_alpaca', 
+            'sharegptv2',
+            'wizardlmv2',
+            'oasst1',
+            'flan_v2',
+            'dolly',
+            'ultrachat200kv2',
+            'lima',
+        ]
+        for dataset in dataset_list:
+            generate_randsphere_model_output(dataset, D=4096, model_name='randspherep4096')
+        ```
+    """
+    ds = get_dataset(dataset)
+    N = len(ds)
+
+    np.random.seed(0)
+    X = random_uniform_hypersphere_surface(N, D)
+    X = X.astype(np.float32)
+
+
+    save_dir = os.path.join(lm_output_dir, 'sft', model_name)
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, f'{dataset}.pkl')
+    with open(save_path, 'wb') as f:
+        output = {
+            'grad_rp_loraB': X,
+        }
+        pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+
 def get_sorted_inds(dataset, model_name, sort_by):
     save_path = os.path.join(data_inds_dir, model_name, dataset, f'{sort_by}.pkl')
     with open(save_path, 'rb') as f:
@@ -565,9 +612,9 @@ def filter_json_by_numtoks(jsonl_path, tokenizer_name='llama7b', max_seq_length=
             examples.append(json.loads(line))
 
     if tokenizer_name.startswith('llama'):
-        tokenizer_name_or_path = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/huggyllama/llama-7b'
+        tokenizer_name_or_path = get_tokenizer_name_or_path('llama-7b')
     elif tokenizer_name.startswith('codellama'):
-        tokenizer_name_or_path = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/codellama/CodeLlama-7b-hf'
+        tokenizer_name_or_path = get_tokenizer_name_or_path('codellama-7b')
     else:
         raise ValueError(f'Unknown tokenizer_name={tokenizer_name}')
 
@@ -780,11 +827,6 @@ def get_alpacafarm_generations(save_dirs, filter_fn_name=None, task='alpacafarm_
     return df
 
 
-
-
-
-
-
 md_to_model_name = {
     'mpnet': 'all-mpnet-base-v2',
     'bge': 'bge-large-en-v1.5',
@@ -801,6 +843,7 @@ md_to_model_name.update({
     'llama7br256p4096': 'llama-7b+lora:r=256:a=4096+proj=4096',
     'llama7br512p4096': 'llama-7b+lora:r=512:a=11585+proj=4096',
     'pythia1br512p4096': 'pythia-1b+lora:r=512:a=11585+proj=4096',
+    'randspherep4096': 'randspherep4096',
 })
 
 

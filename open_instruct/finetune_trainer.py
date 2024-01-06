@@ -5,7 +5,6 @@ This file is modified from the huggingface example for finetuning language model
 [run_clm.py](https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py)
 """
 import os
-os.environ['TORCHELASTIC_ERROR_FILE'] = '/gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/open-instruct/scripts/error_file'
 
 ## wpq: https cannot download huggingface's model related files
 #  - https://github.com/huggingface/transformers/issues/17611
@@ -507,18 +506,18 @@ def main():
         dataset_args = {}
         if data_args.train_file is not None:
             data_files["train"] = data_args.train_file
-        if 'ultrachat' in data_args.train_file:
-            data_files['test'] = (
-                '/gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/open-instruct/'
-                'data/processed/ultrachat/ultrachat200k_test_data.jsonl')
+        # if 'ultrachat' in data_args.train_file:
+        #     data_files['test'] = (
+        #         '/gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/open-instruct/'
+        #         'data/processed/ultrachat/ultrachat200k_test_data.jsonl')
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
             cache_dir=model_args.cache_dir if model_args.cache_dir else os.path.dirname(data_files['train']),
             **dataset_args,
         )
-        if 'ultrachat' in data_args.train_file:
-            raw_datasets['test'] = raw_datasets['test'].select(range(1000))
+        # if 'ultrachat' in data_args.train_file:
+        #     raw_datasets['test'] = raw_datasets['test'].select(range(1000))
 
 
     config_kwargs = {
