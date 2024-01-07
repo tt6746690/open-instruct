@@ -604,11 +604,13 @@ def compute_dppmap(
     ## parse `text_embedding_rp256` to `text_embedding` and `rand_proj` dimensions
     match = re.search(r'rp(\d+)', kernel_embed_type)
     rand_proj = int(match.group(1)) if match else None
+    match = re.search(r'N(\d+)', kernel_embed_type)
+    N = int(match.group(1)) if match else None # subsample a subset `N` to run dppmap over
     kernel_embed_type = re.sub(r'_rp(\d+)', '', kernel_embed_type)
+    kernel_embed_type = re.sub(r'_N(\d+)', '', kernel_embed_type)
     if kernel_embed_type not in ['text_embedding', 'grad_rp_loraB']:
         raise ValueError(f'kernel_embed_type={kernel_embed_type} not supported.')
         
-
     dk = get_lm_output(
         dataset, 
         get_full_model_name(kernel_embed_model),
@@ -627,6 +629,7 @@ def compute_dppmap(
         max_length = 100_000
 
     X = torch.from_numpy(X).to(device)
+    NX = X.shape[0]
 
     if quality_score_type is None:
         Q = torch.ones([1], device=device).expand(len(X))
@@ -674,12 +677,24 @@ def compute_dppmap(
     else:
         J = None
 
+    ## take a subset of X, Q, Y, J for faster processing
+    if N is not None and N < NX:
+        np.random.seed(0)
+        inds_subset = np.random.choice(len(X), N, replace=False)
+        X = X[inds_subset]
+        Q = Q[inds_subset]
+        if Y is not None: Y = Y[inds_subset]
+        if J is not None: J = J[np.isin(J, inds_subset)]
+    else:
+        N = X.shape[0]
 
-    N = X.shape[0]
-    if not X.shape[0] == Q.numel():
-        raise ValueError(f'X ({X.shape}) and Q ({Q.shape}) does not match')
+    for k, x in {'X': X, 'Q': Q, 'Y': Y, 'J': J}.items():
+        if x is not None:
+            if x.shape[0] != N:
+                raise ValueError(f'{k}.shape[0]={x.shape[0]} != N={N}')
 
     info = {
+        'N': N,
         'dppmap_type': dppmap_type,
         'dataset': dataset,
         'kernel_type': kernel_type,
@@ -714,16 +729,22 @@ def compute_dppmap(
     plt_subset_size_vs_kernel_params(dataset) # update the subset size vs. kernel hyperparameter trend plot.
 
 
+    ## Need to convert `inds` from subset of `X` (if N!=NX) index space to the original X's index space.
+    # so that `S` returned corresponds to the original `X` that is not subsetted and we can actually use 
+    # the corresponding score/indices to rank the original `X` for finetuning.
+    if N < NX:
+        inds = inds_subset[inds].tolist()
+
     ## convert `inds` to scores `S`
     # assign random data points to the rest of the slots, after `max_length`
-    inds_left = set(np.arange(N).tolist()) - set(inds)
+    inds_left = set(np.arange(NX).tolist()) - set(inds)
     np.random.seed(0)
     inds_left = np.random.permutation(list(inds_left)).tolist()
     inds += inds_left
-    if not len(inds) == N:
-        raise ValueError(f'len(inds)={len(inds)} != N={N}')
+    if not len(inds) == NX:
+        raise ValueError(f'len(inds)={len(inds)} != NX={NX}')
     # points ranked higher in `inds` will have a smaller score
-    S = np.zeros(N, dtype=np.int64)
+    S = np.zeros(NX, dtype=np.int64)
     for i, ind in enumerate(inds):
         S[ind] = i
 
