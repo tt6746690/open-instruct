@@ -623,6 +623,8 @@ def compute_dppmap(
         print(f'Start random projection from {X.shape[1]} -> {rand_proj} ...')
         X = jl_proj.fit_transform(X)
         print('Done random projection.')
+        print(f'Setting `max_length`: {max_length} -> 100_000')
+        max_length = 100_000
 
     X = torch.from_numpy(X).to(device)
 
