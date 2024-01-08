@@ -10,6 +10,7 @@ import math
 import os
 import random
 from copy import deepcopy
+import pyarrow # add before datasets/torch
 import datasets
 import torch
 from functools import partial
@@ -27,6 +28,7 @@ from transformers import (
     AutoTokenizer,
     LlamaTokenizer,
     LlamaTokenizerFast,
+    CodeLlamaTokenizerFast,
     SchedulerType,
     get_scheduler,
     GPTNeoXTokenizerFast,
@@ -40,7 +42,7 @@ from dpo_utils import dpo_loss, concatenated_forward, DataCollatorForSeq2SeqDPO
 logger = get_logger(__name__)
 
 
-def parse_args():
+def parse_args(cmd=None):
     parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
     parser.add_argument(
         "--dataset_name",
@@ -238,7 +240,11 @@ def parse_args():
         action='store_true',
         help='Use paged optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead).',
     )
-    args = parser.parse_args()
+    if cmd is not None:
+        from rosemary import jpt_parse_args
+        args = jpt_parse_args(parser, cmd)
+    else:
+        args = parser.parse_args()
 
     # Sanity checks
     if args.dataset_name is None and args.train_file is None:
@@ -490,15 +496,33 @@ def main():
 
 
     # no default pad token for llama!
-    # here we add all special tokens again, because the default ones are not in the special_tokens_map
-    if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+    # here we add all special tokens again, because the default ones are not in the special_tokens_map 
+    if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast, CodeLlamaTokenizerFast)):
+        from transformers import AddedToken
         num_added_tokens = tokenizer.add_special_tokens({
-            "bos_token": "<s>",
-            "eos_token": "</s>",
-            "unk_token": "<unk>",
-            "pad_token": "<pad>",
+            "bos_token": AddedToken("<s>", normalized=False, special=True),
+            "eos_token": AddedToken("</s>", normalized=False, special=True),
+            "unk_token": AddedToken("<unk>", normalized=False, special=True),
+            "pad_token": AddedToken("<pad>", normalized=False, special=True),
         })
-        assert num_added_tokens in [0, 1], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        ## wpq: for `huggyllama`/`NousResearch/Llama-2-7b-hf`, `LlamaTokenizerFast` tokenizer config not properly implemented and cannot tokenize special tokens like eos_token corretly. Need the following workaround. More details: https://github.com/huggingface/transformers/issues/23833
+        if isinstance(tokenizer, LlamaTokenizerFast):
+            if os.path.isdir(args.model_name_or_path):
+                tmp_tok_path = os.path.join(
+                    os.path.dirname(args.model_name_or_path),
+                    os.path.basename(args.model_name_or_path)+'_fixtok')
+                if not os.path.isdir(tmp_tok_path):
+                    raise ValueError(f'Not valid fixtok path: {tmp_tok_path}')
+            else:
+                from secrets import token_hex
+                tmp_tok_path = f'/tmp/wpq_tok_{token_hex(16)}'
+                tokenizer.save_pretrained(tmp_tok_path)
+            tokenizer = AutoTokenizer.from_pretrained(tmp_tok_path, use_fast=not args.use_slow_tokenizer)
+        for s, s_tokenized in [
+            ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
+            ['▁Hi', '<s>', '▁Hey', '</s>', '▁sir', '<unk>', '▁what', '<pad>', '<pad>']),
+        ]:
+            assert(tokenizer.tokenize(s, add_special_tokens=False)==s_tokenized)
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         num_added_tokens = tokenizer.add_special_tokens({
             "pad_token": "<pad>",
@@ -553,8 +577,8 @@ def main():
         )
         lm_datasets.set_format(type="pt")
         # our thresholding mighta meant some examples have no labels, remove.
-        lm_datasets = lm_datasets.filter(lambda example: (example['chosen_labels'] != -100).any())
-        lm_datasets = lm_datasets.filter(lambda example: (example['rejected_labels'] != -100).any())
+        lm_datasets = lm_datasets.filter(lambda example: (example['chosen_labels'] != -100).any(), num_proc=8)
+        lm_datasets = lm_datasets.filter(lambda example: (example['rejected_labels'] != -100).any(), num_proc=8)
 
     train_dataset = lm_datasets
 
@@ -600,6 +624,7 @@ def main():
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
+
 
     # Create the learning rate scheduler.
     # Note: the current accelerator.step() calls the .step() of the real scheduler for the `num_processes` times. This is because they assume 
