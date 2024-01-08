@@ -762,6 +762,42 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000, version='wiz
 
 
 
+def convert_ultrafeedback_data(data_dir, output_dir):
+    """Currently use cleaned version from allenai
+            ultrafeedback: allenai/ultrafeedback_binarized_cleaned
+
+        ```
+        from open_instruct.reformat_datasets import convert_ultrafeedback_data
+        data_dir = 'data/raw_train/ultrafeedback'
+        output_dir = 'data/processed/ultrafeedback'
+        convert_ultrafeedback_data(data_dir, output_dir)
+        ```
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    dataset = 'ultrafeedback'
+    df = pd.read_parquet(os.path.join(data_dir, "allenai_ultrafeedback_binarized_cleaned_train_prefs.parquet"))    
+    examples = [row.to_dict() for _, row in df.iterrows()]
+
+    output_path = os.path.join(output_dir, f'{dataset}_data.jsonl')
+    with open(output_path, 'w') as fout:
+        for idx, example in enumerate(examples):
+            fout.write(json.dumps({
+                'dataset': dataset,
+                'prompt': example['prompt'],
+                'chosen': example['chosen'].tolist(),
+                'rejected': example['rejected'].tolist(),
+                'score_chosen': example['score_chosen'],
+                'score_rejected': example['score_rejected'],
+                'source': example['source'],
+            }) + "\n")
+            
+    print(f"Filtering {dataset} to max_seq_length=2048...")
+    filepath = os.path.join(output_dir, f"{dataset}_data.jsonl")
+    filter_json_by_numtoks(filepath, max_seq_length=2048)
+
+
+
 def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gpt35_examples=0, version='open_orca'):
     """
         ```
@@ -801,17 +837,12 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
                     "messages": messages,
                 }) + "\n")
 
-    elif open_orca == 'open_orca_slim':
+    elif version == 'open_orca_slim':
         ## wpq: open_orca_slim
         examples = [] 
         with open(os.path.join(data_dir, "oo-labeled_correct.gpt4.sharegpt.jsonl"), "r") as f:
             for line in f:
                 examples.append(json.loads(line))
-        
-        examples = filter_examples_by_numtoks(
-            examples,
-            tokenizer_name_or_path='/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/results/baselines/huggyllama/llama-7b',
-            max_seq_length=2048)
 
         output_path = os.path.join(output_dir, "open_orca_slim_data.jsonl")
         with open(output_path, "w") as fout:

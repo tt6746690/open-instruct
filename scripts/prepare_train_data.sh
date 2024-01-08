@@ -151,8 +151,12 @@ echo "Downloading the HardCoded dataset..."
 wget -P data/raw_train/hard_coded/ https://beaker.org/api/v3/datasets/01HBS14BBV16K45MMFSYJR86CA/files/hard_coded_examples.xlsx
 
 
-echo "Downloading Alpagasus dataset..."
+echo "Downloading the Alpagasus dataset..."
 wget -P data/raw_train/alpagasus https://raw.githubusercontent.com/gpt4life/alpagasus/main/data/filtered/chatgpt_9k.json
+
+
+echo "Downloading the UltraFeedback dataset..."
+wget -P data/raw_train/ultrafeedback/ https://huggingface.co/datasets/allenai/ultrafeedback_binarized_cleaned/resolve/main/data/train_prefs-00000-of-00001.parquet?download=true -O data/raw_train/ultrafeedback/allenai_ultrafeedback_binarized_cleaned_train_prefs.parquet
 
 
 echo "Processing datasets..."

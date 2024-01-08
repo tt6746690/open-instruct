@@ -121,31 +121,143 @@ def get_dataset(dataset, processed=True):
     return ds
 
 
+
+
+def encode_with_messages_format_dpo(example, tokenizer, max_seq_length):
+    '''Taken from `dpo_tune.py`.
+    Here we assume each example has a rejected and chosen field, both of which are a list of messages.
+    Each message is a dict with 'role' and 'content' fields.
+    We concatenate all messages with the roles as delimiters and tokenize them together.
+    We assume only the last message is different, and the prompt is contained in the list of messages.
+    '''
+    chosen_messages = example['chosen']
+    rejected_messages = example['rejected']
+    if len(chosen_messages) == 0:
+        raise ValueError('chosen messages field is empty.')
+    if len(rejected_messages) == 0:
+        raise ValueError('rejected messages field is empty.')
+    
+    def _concat_messages(messages):
+        message_text = ""
+        for message in messages:
+            if message["role"] == "system":
+                message_text += "<|system|>\n" + message["content"].strip() + "\n"
+            elif message["role"] == "user":
+                message_text += "<|user|>\n" + message["content"].strip() + "\n"
+            elif message["role"] == "assistant":
+                message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
+            else:
+                raise ValueError("Invalid role: {}".format(message["role"]))
+        return message_text
+        
+    def encode_messages(messages):
+        example_text = _concat_messages(messages).strip()
+        tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
+        input_ids = tokenized_example.input_ids
+        labels = input_ids.clone()
+
+        # mask the non-assistant part for avoiding loss
+        for message_idx, message in enumerate(messages):
+            if message["role"] != "assistant":
+                if message_idx == 0:
+                    message_start_idx = 0
+                else:
+                    message_start_idx = tokenizer(
+                        _concat_messages(messages[:message_idx]), return_tensors='pt', max_length=max_seq_length, truncation=True
+                    ).input_ids.shape[1]
+                if message_idx < len(messages) - 1 and messages[message_idx+1]["role"] == "assistant":
+                    # here we also ignore the role of the assistant
+                    messages_so_far = _concat_messages(messages[:message_idx+1]) + "<|assistant|>\n"
+                else:
+                    messages_so_far = _concat_messages(messages[:message_idx+1])
+                message_end_idx = tokenizer(
+                    messages_so_far,
+                    return_tensors='pt', 
+                    max_length=max_seq_length, 
+                    truncation=True
+                ).input_ids.shape[1]
+                labels[:, message_start_idx:message_end_idx] = -100
+                
+                if message_end_idx >= max_seq_length:
+                    break
+
+        attention_mask = torch.ones_like(input_ids)
+        return {
+            'input_ids': input_ids.flatten(),
+            'labels': labels.flatten(),
+            'attention_mask': attention_mask.flatten(),
+        }
+    chosen_encoded = encode_messages(chosen_messages)
+    rejected_encoded = encode_messages(rejected_messages)
+    # labels are useful for working out where the loss is valid.
+    return {
+        'chosen_input_ids': chosen_encoded['input_ids'],
+        'chosen_labels': chosen_encoded['labels'],
+        'chosen_attention_mask': chosen_encoded['attention_mask'],
+        'rejected_input_ids': rejected_encoded['input_ids'],
+        'rejected_labels': rejected_encoded['labels'],
+        'rejected_attention_mask': rejected_encoded['attention_mask'],
+    }
+
+
 def get_dataset_token_lengths(dataset, tokenizer, inds=None, num_proc=128, max_seq_length=10_000):
     """Get token lengths for dataset when `encode_with_messages_format` is used.
-        Change `max_seq_length` to get an idea if any example is truncated. """
-    from open_instruct.finetune_trainer import encode_with_messages_format
+        Change `max_seq_length` to a very large number to get an idea if any example is truncated. 
+        
+        Takes into account of both sft/preference dataset
+            - sft dataset: requires `dataset` to have `messages` field.
+            - preference dataset: requires `dataset` to have `chosen` and `rejected` fields, which are themselves messages.
+        """
     if isinstance(dataset, str):
         ds = get_dataset(dataset)
     else: 
         ds = dataset
     if inds is not None: ds = ds.select(inds)
-    encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=max_seq_length)
+
+    dataset_type = 'pref' if ('chosen' in ds.column_names and 'rejected' in ds.column_names) else 'sft'
+
+    if dataset_type == 'pref':
+        encode_fn = partial(encode_with_messages_format_dpo, tokenizer=tokenizer, max_seq_length=max_seq_length)
+    else:
+        from open_instruct.finetune_trainer import encode_with_messages_format
+        encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=max_seq_length)
+
     ds = ds.map(encode_fn, batched=False, num_proc=num_proc)
     ds.set_format(type='np')
-
-    def count_token_lengths(d):
-        x = d['labels']
-        numtoks_input = x[x==-100].shape[0]
-        numtoks_output = x.shape[0] - numtoks_input
-        return {'numtoks_input': numtoks_input, 
-                'numtoks_output': numtoks_output,
-                'numtoks_total': numtoks_input + numtoks_output}
+    
+    if dataset_type == 'pref':
+        def count_token_lengths(d):
+            output = {}
+            for k in ['chosen', 'rejected']:
+                x = d[f'{k}_labels']
+                numtoks_input = x[x==-100].shape[0]
+                numtoks_output = x.shape[0] - numtoks_input
+                output.update({
+                    f'{k}_numtoks_input': numtoks_input, 
+                    f'{k}_numtoks_output': numtoks_output,
+                    f'{k}_numtoks_total': numtoks_input + numtoks_output
+                })
+            # take max of chosen/rejected numtoks
+            output = {
+                'numtoks_input': max(output['chosen_numtoks_input'], output['rejected_numtoks_input']),
+                'numtoks_output': max(output['chosen_numtoks_output'], output['rejected_numtoks_output']),
+                'numtoks_total': max(output['chosen_numtoks_total'], output['rejected_numtoks_total']),
+            }
+            return output
+    else:
+        def count_token_lengths(d):
+            x = d['labels']
+            numtoks_input = x[x==-100].shape[0]
+            numtoks_output = x.shape[0] - numtoks_input
+            return {'numtoks_input': numtoks_input, 
+                    'numtoks_output': numtoks_output,
+                    'numtoks_total': numtoks_input + numtoks_output}
 
     ds = ds.map(count_token_lengths, num_proc=num_proc)
-    for k in ['input_ids', 'labels', 'attention_mask']:
-        if k in ds.column_names:
-            ds = ds.remove_columns(k)
+    for k in ds.column_names:
+        for k in ['input_ids', 'labels', 'attention_mask']:
+            if k in ds.column_names:
+                ds = ds.remove_columns(k)
     return ds
 
 
@@ -605,7 +717,6 @@ def filter_json_by_numtoks(jsonl_path, tokenizer_name='llama7b', max_seq_length=
     """Filter dataset specified by `jsonl_path`,
         so that each example when applied tulu's chat template has numtoks < `max_seq_length`.
         Write the dataset to `jsonl_path`. """
-
     examples = []
     with open(jsonl_path, "r") as f:
         for line in f:
