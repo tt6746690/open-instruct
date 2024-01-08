@@ -615,6 +615,40 @@ def combine_lm_outputs_for_mixes(dataset, save_dir, test_run):
     print(f'Save output={[(k, v.shape) for k, v in output.items()]} to {save_path}')
 
 
+
+def compute_lm_output_for_wizardlm_alpaca(save_dir, dataset):
+    """Generate lm output for alpaca portion of wizardlm.
+        ```
+            from note_llama_embeddings import compute_lm_output_for_wizardlm_alpaca
+            from note_pruning_analysis import lm_output_dir
+            dataset = 'wizardlmv2'
+            save_dirs = glob.glob(f'{lm_output_dir}/*/*/{dataset}.pkl')
+            save_dirs = [os.path.dirname(x) for x in save_dirs]
+            for save_dir in save_dirs:
+                print(f'Processing {save_dir}...')
+                compute_lm_output_for_wizardlm_alpaca(save_dir, dataset)
+        ```
+    """
+    if dataset not in ['wizardlm', 'wizardlmv2']:
+        raise ValueError(f'Only support wizardlm, wizardlmv2, got {dataset}')
+
+    ds = get_dataset(dataset)
+    ds = ds.map(lambda _, i: {'index': i}, with_indices=True, num_proc=8)
+    ds = ds.filter(lambda x: 'alpaca' in x['id'], num_proc=8)
+    inds = ds['index']
+    
+    data_path = os.path.join(save_dir, f'{dataset}.pkl')
+    with open(data_path, 'rb') as f:
+        output = pickle.load(f)
+    output = {k: v[inds] if isinstance(v, np.ndarray) else v 
+              for k, v in output.items()}
+    save_path = os.path.join(save_dir, 'wizardlm_alpaca.pkl')
+    with open(save_path, 'wb') as f:
+        pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+
+
 def datasets_shard_chunk_size(N, num_shards, index):
     """Get chunk size for `datasets.shard(..., contiguous=True)`. """
     div = N // num_shards
@@ -693,6 +727,10 @@ def compute_lm_outputs(
                    'tulu_v2_human_mix',
                    'tulu_v2_mix']:
         combine_lm_outputs_for_mixes(dataset, save_dir, test_run)
+        return
+    
+    if dataset in ['wizardlm_alpaca']:
+        compute_lm_output_for_wizardlm_alpaca(save_dir, 'wizardlmv2')
         return
 
     if use_dist:
