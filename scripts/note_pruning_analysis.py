@@ -303,24 +303,18 @@ def random_uniform_hypersphere_surface(N, D):
 
 
 
-def generate_randsphere_model_output(dataset, D, model_name='randspherep4096'):
+def generate_randsphere_model_output(dataset, D, model_name='randspherep4096', encode_fn_type='sft', embed_type='grad_rp_loraB'):
     """Generate uniformlys sampled points on hypersphere surface
         to `model_outputs` under `randsphere`
 
         ```
         from note_pruning_analysis import generate_randsphere_model_output
         dataset_list = [
-            'stanford_alpaca', 
-            'sharegptv2',
-            'wizardlmv2',
-            'oasst1',
-            'flan_v2',
-            'dolly',
-            'ultrachat200kv2',
-            'lima',
+            'flan_v2', # ~100k data
         ]
         for dataset in dataset_list:
-            generate_randsphere_model_output(dataset, D=4096, model_name='randspherep4096')
+            generate_randsphere_model_output(dataset, 4096, model_name='randspherep4096', encode_fn_type='sft', embed_type='grad_rp_loraB')
+            generate_randsphere_model_output(dataset, 768, model_name='randspherep768', encode_fn_type='input', embed_type='text_embedding')
         ```
     """
     ds = get_dataset(dataset)
@@ -330,13 +324,12 @@ def generate_randsphere_model_output(dataset, D, model_name='randspherep4096'):
     X = random_uniform_hypersphere_surface(N, D)
     X = X.astype(np.float32)
 
-
-    save_dir = os.path.join(lm_output_dir, 'sft', model_name)
+    save_dir = os.path.join(lm_output_dir, encode_fn_type, model_name)
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f'{dataset}.pkl')
     with open(save_path, 'wb') as f:
         output = {
-            'grad_rp_loraB': X,
+            embed_type: X,
         }
         pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -955,6 +948,7 @@ md_to_model_name.update({
     'llama7br512p4096': 'llama-7b+lora:r=512:a=11585+proj=4096',
     'pythia1br512p4096': 'pythia-1b+lora:r=512:a=11585+proj=4096',
     'randspherep4096': 'randspherep4096',
+    'randspherep768': 'randspherep768',
 })
 
 

@@ -636,7 +636,13 @@ def compute_lm_output_for_wizardlm_alpaca(save_dir, dataset):
     ds = ds.map(lambda _, i: {'index': i}, with_indices=True, num_proc=8)
     ds = ds.filter(lambda x: 'alpaca' in x['id'], num_proc=8)
     inds = ds['index']
+
+    ## write to data/processed/
+    from note_pruning_analysis import processed_dir
+    save_path = os.path.join(processed_dir, 'wizardlm', 'wizardlm_alpaca_data.jsonl')
+    ds.to_json(save_path)
     
+    ## write to model_outputs/
     data_path = os.path.join(save_dir, f'{dataset}.pkl')
     with open(data_path, 'rb') as f:
         output = pickle.load(f)

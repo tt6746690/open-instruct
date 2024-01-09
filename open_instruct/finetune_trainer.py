@@ -593,24 +593,30 @@ def main():
             "unk_token": AddedToken("<unk>", normalized=False, special=True),
             "pad_token": AddedToken("<pad>", normalized=False, special=True),
         })
-        ## wpq: for `huggyllama`/`NousResearch/Llama-2-7b-hf`, `LlamaTokenizerFast` tokenizer config not properly implemented and cannot tokenize special tokens like eos_token corretly. Need the following workaround. More details: https://github.com/huggingface/transformers/issues/23833
-        if isinstance(tokenizer, LlamaTokenizerFast):
+        ## wpq: for `huggyllama`/`NousResearch/Llama-2-7b-hf`, `LlamaTokenizerFast` tokenizer config not properly implemented and cannot tokenize special tokens like eos_token corretly. 
+        # Need the following workaround. More details: https://github.com/huggingface/transformers/issues/23833
+        def check_tokenizer_pad_properly(tokenizer):
+            tokenizer_handles_pad_ok = True
+            for s, s_tokenized in [
+                ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
+                ['▁Hi', '<s>', '▁Hey', '</s>', '▁sir', '<unk>', '▁what', '<pad>', '<pad>']),
+            ]:
+                if tokenizer.tokenize(s, add_special_tokens=False)!=s_tokenized:
+                    tokenizer_handles_pad_ok = False
+            return tokenizer_handles_pad_ok
+        if not check_tokenizer_pad_properly(tokenizer):
             if os.path.isdir(model_args.model_name_or_path):
                 tmp_tok_path = os.path.join(
                     os.path.dirname(model_args.model_name_or_path),
                     os.path.basename(model_args.model_name_or_path)+'_fixtok')
                 if not os.path.isdir(tmp_tok_path):
-                    raise ValueError(f'Not valid fixtok path: {tmp_tok_path}')
+                    tokenizer.save_pretrained(tmp_tok_path)
             else:
                 from secrets import token_hex
                 tmp_tok_path = f'/tmp/wpq_tok_{token_hex(16)}'
                 tokenizer.save_pretrained(tmp_tok_path)
             tokenizer = AutoTokenizer.from_pretrained(tmp_tok_path, **tokenizer_kwargs)
-        for s, s_tokenized in [
-            ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
-            ['▁Hi', '<s>', '▁Hey', '</s>', '▁sir', '<unk>', '▁what', '<pad>', '<pad>']),
-        ]:
-            assert(tokenizer.tokenize(s, add_special_tokens=False)==s_tokenized)
+        assert(check_tokenizer_pad_properly(tokenizer))
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         num_added_tokens = tokenizer.add_special_tokens({
             "pad_token": "<pad>",

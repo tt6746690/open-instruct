@@ -8,6 +8,7 @@ import argparse
 import logging
 import math
 import os
+import json
 import random
 from copy import deepcopy
 import pyarrow # add before datasets/torch
@@ -384,6 +385,7 @@ def prepare_deepspeed(accelerator, model):
 def main():
     args = parse_args()
 
+
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
@@ -417,6 +419,14 @@ def main():
             os.makedirs(args.output_dir, exist_ok=True)
     
     accelerator.wait_for_everyone()
+
+    ## wpq: save args
+    with accelerator.main_process_first():
+        args_dict_path = args.output_dir+'.args.json'
+        with open(args_dict_path, 'w') as f:
+            json.dump(vars(args), f, indent=4)
+        logger.info(f'Saving args dict to {args_dict_path}')
+    ## 
 
     if args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
@@ -505,24 +515,30 @@ def main():
             "unk_token": AddedToken("<unk>", normalized=False, special=True),
             "pad_token": AddedToken("<pad>", normalized=False, special=True),
         })
-        ## wpq: for `huggyllama`/`NousResearch/Llama-2-7b-hf`, `LlamaTokenizerFast` tokenizer config not properly implemented and cannot tokenize special tokens like eos_token corretly. Need the following workaround. More details: https://github.com/huggingface/transformers/issues/23833
-        if isinstance(tokenizer, LlamaTokenizerFast):
+        ## wpq: for `huggyllama`/`NousResearch/Llama-2-7b-hf`, `LlamaTokenizerFast` tokenizer config not properly implemented and cannot tokenize special tokens like eos_token corretly. 
+        # Need the following workaround. More details: https://github.com/huggingface/transformers/issues/23833
+        def check_tokenizer_pad_properly(tokenizer):
+            tokenizer_handles_pad_ok = True
+            for s, s_tokenized in [
+                ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
+                ['▁Hi', '<s>', '▁Hey', '</s>', '▁sir', '<unk>', '▁what', '<pad>', '<pad>']),
+            ]:
+                if tokenizer.tokenize(s, add_special_tokens=False)!=s_tokenized:
+                    tokenizer_handles_pad_ok = False
+            return tokenizer_handles_pad_ok
+        if not check_tokenizer_pad_properly(tokenizer):
             if os.path.isdir(args.model_name_or_path):
                 tmp_tok_path = os.path.join(
                     os.path.dirname(args.model_name_or_path),
                     os.path.basename(args.model_name_or_path)+'_fixtok')
                 if not os.path.isdir(tmp_tok_path):
-                    raise ValueError(f'Not valid fixtok path: {tmp_tok_path}')
+                    tokenizer.save_pretrained(tmp_tok_path)
             else:
                 from secrets import token_hex
                 tmp_tok_path = f'/tmp/wpq_tok_{token_hex(16)}'
                 tokenizer.save_pretrained(tmp_tok_path)
             tokenizer = AutoTokenizer.from_pretrained(tmp_tok_path, use_fast=not args.use_slow_tokenizer)
-        for s, s_tokenized in [
-            ("Hi<s>Hey</s>sir<unk>what<pad><pad>", 
-            ['▁Hi', '<s>', '▁Hey', '</s>', '▁sir', '<unk>', '▁what', '<pad>', '<pad>']),
-        ]:
-            assert(tokenizer.tokenize(s, add_special_tokens=False)==s_tokenized)
+        assert(check_tokenizer_pad_properly(tokenizer))
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         num_added_tokens = tokenizer.add_special_tokens({
             "pad_token": "<pad>",
@@ -576,15 +592,16 @@ def main():
             desc="Tokenizing and reformatting instruction data",
         )
         lm_datasets.set_format(type="pt")
-        # our thresholding mighta meant some examples have no labels, remove.
-        lm_datasets = lm_datasets.filter(lambda example: (example['chosen_labels'] != -100).any(), num_proc=8)
-        lm_datasets = lm_datasets.filter(lambda example: (example['rejected_labels'] != -100).any(), num_proc=8)
+        # wpq: if enforce max_seq_length properly, below should do nothing, so just remove.
+        # # our thresholding mighta meant some examples have no labels, remove.
+        # lm_datasets = lm_datasets.filter(lambda example: (example['chosen_labels'] != -100).any(), num_proc=8)
+        # lm_datasets = lm_datasets.filter(lambda example: (example['rejected_labels'] != -100).any(), num_proc=8)
 
     train_dataset = lm_datasets
 
-    # Log a few random samples from the training set:
-    for index in random.sample(range(len(train_dataset)), 3):
-        logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
+    # # Log a few random samples from the training set:
+    # for index in random.sample(range(len(train_dataset)), 3):
+    #     logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
 
     # DataLoaders creation:
     train_dataloader = DataLoader(
@@ -799,6 +816,14 @@ def main():
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
         save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
+
+
+    ## wpq: save args
+    with accelerator.main_process_first():
+        args_dict_path = args.output_dir+'.args.json'
+        if os.path.isfile(args_dict_path) and os.path.isdir(args.output_dir):
+            os.rename(args_dict_path, os.path.join(args.output_dir, 'ft_args.json'))
+    ##
 
 
 if __name__ == "__main__":
