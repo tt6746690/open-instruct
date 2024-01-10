@@ -573,6 +573,11 @@ def main():
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
+    # wpq: `use_cache=True` is incompatible with gradient checkpointing
+    model.config.use_cache = True if not args.gradient_checkpointing else False
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+
     # Preprocessing the datasets.
     if "prompt" in raw_datasets["train_prefs"].column_names and "completion" in raw_datasets["train_prefs"].column_names:
         raise ValueError("Sorry, prompt-completion format is not supported for DPO training.")
@@ -690,7 +695,7 @@ def main():
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("open_instruct", experiment_config)
+        accelerator.init_trackers("mitibm", experiment_config)
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
