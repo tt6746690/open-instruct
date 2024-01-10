@@ -403,6 +403,8 @@ def main():
         level=logging.INFO,
     )
     logger.info(accelerator.state, main_process_only=False)
+    logger.info(f'[wpq] SLURM_PROCID: {os.environ.get("SLURM_PROCID", None)}')
+
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
@@ -657,6 +659,11 @@ def main():
         num_training_steps=num_training_steps_for_scheduler,
         num_warmup_steps=int(num_training_steps_for_scheduler * args.warmup_ratio),
     )
+    logger.info(f"[wpq]  num_update_steps_per_epoch = {num_update_steps_per_epoch}")
+    logger.info(f"[wpq]  overrode_max_train_steps = {overrode_max_train_steps}")
+    logger.info(f"[wpq]  args.max_train_steps = {args.max_train_steps}")
+    logger.info(f"[wpq]  num_training_steps_for_scheduler = {num_training_steps_for_scheduler}")
+    logger.info(f"[wpq]  accelerator.num_processes = {accelerator.num_processes}")
 
     # Prepare everything with `accelerator`.
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -687,6 +694,7 @@ def main():
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+
     
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
