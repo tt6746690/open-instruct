@@ -11,6 +11,7 @@ import math
 import os
 import json
 import random
+from collections import defaultdict
 from copy import deepcopy
 import pyarrow # add before datasets/torch
 import datasets
@@ -786,6 +787,7 @@ def main():
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
+            logps = defaultdict(int)
             # dpo forward pass & loss
             with accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, batch)
@@ -801,6 +803,10 @@ def main():
                 loss = losses.mean()
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
+                logps['logps_policy_chosen'] += policy_chosen_logps.detach().float()
+                logps['logps_policy_rejected'] += policy_rejected_logps.detach().float()
+                logps['logps_reference_chosen'] += reference_chosen_logps.detach().float()
+                logps['logps_reference_rejected'] += reference_rejected_logps.detach().float()
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
@@ -815,6 +821,8 @@ def main():
                 completed_steps += 1
                 if args.logging_steps and completed_steps % args.logging_steps == 0:
                     avg_loss = accelerator.gather(total_loss).mean().item() / args.gradient_accumulation_steps / args.logging_steps
+                    for k in list(logps.keys()):
+                        logps[k] = accelerator.gather(logps[k]).mean().item() / args.gradient_accumulation_steps
                     logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
                     if args.with_tracking:
                         accelerator.log(
@@ -822,6 +830,10 @@ def main():
                                 "learning_rate": lr_scheduler.get_last_lr()[0],
                                 "train_loss": avg_loss,
                                 "step": completed_steps,
+                                'logps_policy_chosen': logps['logps_policy_chosen'],
+                                'logps_policy_rejected': logps['logps_policy_rejected'],
+                                'logps_reference_chosen': logps['logps_reference_chosen'],
+                                'logps_reference_rejected': logps['logps_reference_rejected'],
                             },
                             step=completed_steps,
                         )
