@@ -800,6 +800,7 @@ def main():
                             {
                                 "learning_rate": lr_scheduler.get_last_lr()[0],
                                 "train_loss": avg_loss,
+                                "step": completed_steps,
                             },
                             step=completed_steps,
                         )

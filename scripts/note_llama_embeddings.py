@@ -25,7 +25,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 
 from open_instruct.finetune_trainer import encode_with_prompt_completion_format, encode_with_messages_format
-from note_pruning_analysis import get_dataset
+from note_pruning_analysis import get_dataset, encode_with_messages_format_dpo
 
 
 from sklearn.random_projection import SparseRandomProjection
@@ -707,7 +707,6 @@ def compute_lm_outputs(
         use_dist=False,
         test_run=False,
         shuffle=False,
-        compute_loss=True,
         compute_grad=False,
         use_lora=False,
         lora_rank=128,
@@ -725,6 +724,9 @@ def compute_lm_outputs(
         `shuffle` to allow each process to process roughly similar workload cross the dataset 
             to avoid unnecessary waiting.
     """
+
+    if encode_fn_type == 'pref' and not compute_grad:
+        raise ValueError('compute_grad must be True if use pref encode_fn_type!')
 
     os.makedirs(save_dir, exist_ok=True)
 
@@ -842,6 +844,12 @@ def compute_lm_outputs(
             tokenizer=tokenizer,
             max_seq_length=max_seq_len,
         )
+    elif encode_fn_type == 'pref':
+        encode_function = partial(
+            encode_with_messages_format_dpo,
+            tokenizer=tokenizer,
+            max_seq_length=max_seq_len,
+        )
     else:
         raise ValueError(f'encode_fn_type={encode_fn_type} not implemented.')
 
@@ -849,6 +857,8 @@ def compute_lm_outputs(
     if rank == 0:
         train_dataset = get_dataset(dataset, processed=True)
         print(f"{dataset} dataset length = {len(train_dataset)}")
+        if encode_fn_type != 'pref' and (x in train_dataset.column_names for x in ['chosen', 'rejected']):
+            train_dataset = train_dataset.rename_column('chosen', 'messages')
         train_dataset = train_dataset.map(
             encode_function, batched=False, num_proc=64,
             desc="Tokenizing and reformatting instruction data")
@@ -857,15 +867,20 @@ def compute_lm_outputs(
     if rank!= 0:
         train_dataset = get_dataset(dataset, processed=True)
         print(f"{dataset} dataset length = {len(train_dataset)}")
+        if encode_fn_type != 'pref' and (x in train_dataset.column_names for x in ['chosen', 'rejected']):
+            train_dataset = train_dataset.rename_column('chosen', 'messages')
         train_dataset = train_dataset.map(
             encode_function, batched=False, num_proc=64,
             desc="Tokenizing and reformatting instruction data")
 
-        
+    keep_cols = ['input_ids', 'labels', 'attention_mask']
+    if encode_fn_type == 'pref':
+        keep_cols = [f'chosen_{x}' for x in keep_cols] + [f'rejected_{x}' for x in keep_cols]
     train_dataset.set_format(
         type="torch",
         output_all_columns=False,
-        columns=['input_ids', 'labels', 'attention_mask'])
+        columns=keep_cols)
+    
     if shuffle:
         random.seed(0)
         shuffle_inds = list(range(len(train_dataset)))
@@ -889,33 +904,76 @@ def compute_lm_outputs(
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
         if compute_grad:
-            outputs = model(**batch, output_hidden_states=True, use_cache=False)
+            if encode_fn_type == 'pref':
+                from open_instruct.dpo_utils import dpo_loss, _get_batch_logps, concatenated_inputs
+                # (bsz*2, seq_len, vocab)
+                concatenated_batch = concatenated_inputs(batch)
+                outputs = model(
+                    input_ids=concatenated_batch['concatenated_input_ids'],
+                    attention_mask=concatenated_batch['concatenated_attention_mask'],
+                    labels=concatenated_batch['concatenated_labels'],
+                    output_hidden_states=True,
+                    use_cache=False,
+                )
+                B = batch['chosen_input_ids'].shape[0]
+                all_logits = outputs.logits.to(torch.float32)
+                all_logps_sum, all_logps_avg = _get_batch_logps(
+                    all_logits, 
+                    concatenated_batch['concatenated_labels'], 
+                    average_log_prob='both',
+                    )
+                policy_chosen_logps = all_logps_sum[:B]
+                policy_rejected_logps = all_logps_sum[B:]
+                losses, _, _ = dpo_loss(
+                    policy_chosen_logps,
+                    policy_rejected_logps, 
+                    torch.zeros_like(policy_chosen_logps),
+                    torch.zeros_like(policy_rejected_logps),
+                    beta=0.1)
+                loss = losses.mean()
+                ## use chosen messages' hidden states 
+                outputs['hidden_states'] = [x[:B] for x in outputs['hidden_states']]
+                outputs['loss'] = loss
+            else:
+                outputs = model(**batch, output_hidden_states=True, use_cache=False)
             model.zero_grad()
             outputs['loss'].backward()
         else:
             with torch.inference_mode():
                 outputs = model(**batch, output_hidden_states=True)
         
-        # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
-        last_hidden_state = outputs['hidden_states'][-1]
         if text_pooling_type == 'meanpool':
-            text_embedding = mean_pooling(last_hidden_state, batch['attention_mask'])
+            if encode_fn_type == 'pref':
+                last_hidden_state = outputs['hidden_states'][-1][:B]
+                attention_mask = concatenated_batch['concatenated_attention_mask'][:B]
+            else:
+                # (bsz, seq_len, hidden_size) -> (bsz, hidden_size)
+                last_hidden_state = outputs['hidden_states'][-1]
+                attention_mask = batch['attention_mask']
+            text_embedding = mean_pooling(last_hidden_state, attention_mask)
         elif text_pooling_type == 'cls':
-            text_embedding = last_hidden_state[:, 0]
+            text_embedding = outputs['hidden_states'][-1][:, 0]
         else:
             raise ValueError(f'text_pooling_type={text_pooling_type} not supported.')
         output['text_embedding'].append(text_embedding.to(torch.float32).detach().cpu())
 
-        if compute_loss:
-            # average of output token log probs
-            if 'loss' in outputs:
-                output['log_prob'].append(-outputs['loss'].detach().cpu())
-            
+        if encode_fn_type == 'pref':
+            output['log_prob_pref'].append(-outputs['loss'].detach().cpu()) # Bradley-Terry logprob p(yw>yl|x)
+            # for compatibility's sake, use log_prob/log_prob_sum to repr. sft logprobs on chosen messages
+            output['log_prob'].append(all_logps_avg[0].detach().cpu())
+            output['log_prob_sum'].append(all_logps_sum[0].detach().cpu())
+            output['log_prob_rejected'].append(all_logps_avg[1].detach().cpu())
+            output['log_prob_sum_rejected'].append(all_logps_sum[1].detach().cpu())
+        elif encode_fn_type == 'sft':
+            output['log_prob'].append(-outputs['loss'].detach().cpu())
+            output['log_prob_sum'].append((-outputs['loss']*(batch['labels'][:, 1:] != 100).sum(-1).squeeze()).detach().cpu())
             # el2n scores
             losses = compute_losses(outputs['logits'], batch['labels'])
             for k in ['el2n_agg=mean', 'el2n_agg=l2n', 'logit_margin']:
                 output[k].append(losses[k].detach().cpu())
-            
+        else:
+            pass
+
         if compute_grad:
             ## gradient statistic
             grad_statistics = compute_grad_statistic(model, grad_statistic_patterns)
@@ -1025,7 +1083,6 @@ if __name__ == "__main__":
     parser.add_argument("--use_dist", action='store_true', default=False)
     parser.add_argument("--test_run", action='store_true', default=False)
     parser.add_argument("--shuffle", action='store_true', default=False)
-    parser.add_argument("--compute_loss", action='store_true', default=False)
     parser.add_argument("--compute_grad", action='store_true', default=False)
     parser.add_argument("--use_lora", action='store_true', default=False)
     parser.add_argument("--lora_rank", type=int, default=128)

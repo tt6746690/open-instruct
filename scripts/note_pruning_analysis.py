@@ -214,9 +214,9 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None, num_proc=128, max_s
         ds = dataset
     if inds is not None: ds = ds.select(inds)
 
-    dataset_type = 'pref' if ('chosen' in ds.column_names and 'rejected' in ds.column_names) else 'sft'
+    is_preference_data = True if ('chosen' in ds.column_names and 'rejected' in ds.column_names) else False
 
-    if dataset_type == 'pref':
+    if is_preference_data:
         encode_fn = partial(encode_with_messages_format_dpo, tokenizer=tokenizer, max_seq_length=max_seq_length)
     else:
         from open_instruct.finetune_trainer import encode_with_messages_format
@@ -225,7 +225,7 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None, num_proc=128, max_s
     ds = ds.map(encode_fn, batched=False, num_proc=num_proc)
     ds.set_format(type='np')
     
-    if dataset_type == 'pref':
+    if is_preference_data:
         def count_token_lengths(d):
             output = {}
             for k in ['chosen', 'rejected']:
