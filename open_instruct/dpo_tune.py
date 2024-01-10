@@ -4,6 +4,7 @@
 DPO tuning script. Adapted from our finetuning script.
 '''
 
+import glob
 import argparse
 import logging
 import math
@@ -178,8 +179,7 @@ def parse_args(cmd=None):
     )
     parser.add_argument(
         "--resume_from_checkpoint",
-        type=str,
-        default=None,
+        action="store_true",
         help="If the training should continue from a checkpoint folder.",
     )
     parser.add_argument(
@@ -334,6 +334,14 @@ def encode_with_messages_format(example, tokenizer, max_seq_length):
 
 
 def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
+    ## wpq: reference https://github.com/huggingface/accelerate/blob/v0.21.0/examples/by_feature/deepspeed_with_config_support.py#L707
+    # 
+    if output_dir is None:
+        return
+
+    accelerator.wait_for_everyone()
+    if accelerator.is_main_process:
+        tokenizer.save_pretrained(output_dir)
     unwrapped_model = accelerator.unwrap_model(model)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
     # Otherwise, sometimes the model will be saved with only part of the parameters.
@@ -349,6 +357,7 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
         unwrapped_model.save_pretrained(
             output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict, safe_serialization=False # errors with safetensors...
         )
+
 
 # from trl, we have to prep the ref model separately.
 def prepare_deepspeed(accelerator, model):
@@ -381,6 +390,20 @@ def prepare_deepspeed(accelerator, model):
         model.eval()
         return model
         
+
+def clean_checkpoints(output_dir, keep_n=1):
+    import shutil
+    dirs = glob.glob(os.path.join(output_dir, 'step_*')) + \
+        glob.glob(os.path.join(output_dir, 'epoch_*'))
+    dirs = [x for x in dirs if os.path.isdir(x)]
+    dirs.sort(key=os.path.getctime) # Sorts folders by date modified
+    dirs_remove = dirs[:len(dirs)-keep_n] if keep_n < len(dirs) else []
+    dirs_keep = dirs[len(dirs)-keep_n:] if keep_n < len(dirs) else dirs
+    logger.info(f'Cleaning checkpoints. Keeping {dirs_keep} and removing {dirs_remove}')
+    for d in dirs_remove:
+        shutil.rmtree(d)
+    return dirs_keep
+
 
 def main():
     args = parse_args()
@@ -423,7 +446,7 @@ def main():
     accelerator.wait_for_everyone()
 
     ## wpq: save args
-    with accelerator.main_process_first():
+    if accelerator.is_main_process:
         args_dict_path = args.output_dir+'.args.json'
         with open(args_dict_path, 'w') as f:
             json.dump(vars(args), f, indent=4)
@@ -713,39 +736,37 @@ def main():
     completed_steps = 0
     starting_epoch = 0
 
+    # wpq: instead of using `from_pretrained`, use accelerate's `load_state` to save model weights, optimizer state etc. reference: https://github.com/huggingface/accelerate/blob/v0.25.0/examples/by_feature/deepspeed_with_config_support.py
+
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
-        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
-            checkpoint_path = args.resume_from_checkpoint
-            path = os.path.basename(args.resume_from_checkpoint)
+        dirs = glob.glob(os.path.join(args.output_dir, 'step_*')) + \
+            glob.glob(os.path.join(args.output_dir, 'epoch_*'))
+        dirs = [x for x in dirs if os.path.isdir(x)]
+        dirs.sort(key=os.path.getctime) # Sorts folders by date modified
+        if len(dirs) == 0:
+            args.resume_from_checkpoint = False
+            logger.info(f"No checkpoint found in {args.output_dir}. Training from scratch.")
         else:
-            # Get the most recent checkpoint
-            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
-            dirs.sort(key=os.path.getctime)
-            path = dirs[
-                -1
-            ]  # Sorts folders by date modified, most recent checkpoint is the last
-            checkpoint_path = path
-            path = os.path.basename(checkpoint_path)
+            checkpoint_path = dirs[-1]
+            accelerator.load_state(checkpoint_path)
+            accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
+            # Extract `epoch_{i}` or `step_{i}`
+            training_difference = os.path.splitext(os.path.basename(checkpoint_path))[0]
 
-        accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
-        accelerator.load_state(path)
-        # Extract `epoch_{i}` or `step_{i}`
-        training_difference = os.path.splitext(path)[0]
-
-        if "epoch" in training_difference:
-            starting_epoch = int(training_difference.replace("epoch_", "")) + 1
-            resume_step = None
-            completed_steps = starting_epoch * num_update_steps_per_epoch
-        else:
-            # need to multiply `gradient_accumulation_steps` to reflect real steps
-            resume_step = (
-                int(training_difference.replace("step_", ""))
-                * args.gradient_accumulation_steps
-            )
-            starting_epoch = resume_step // len(train_dataloader)
-            completed_steps = resume_step // args.gradient_accumulation_steps
-            resume_step -= starting_epoch * len(train_dataloader)
+            if "epoch" in training_difference:
+                starting_epoch = int(training_difference.replace("epoch_", "")) + 1
+                resume_step = None
+                completed_steps = starting_epoch * num_update_steps_per_epoch
+            else:
+                # need to multiply `gradient_accumulation_steps` to reflect real steps
+                resume_step = (
+                    int(training_difference.replace("step_", ""))
+                    * args.gradient_accumulation_steps
+                )
+                starting_epoch = resume_step // len(train_dataloader)
+                completed_steps = resume_step // args.gradient_accumulation_steps
+                resume_step -= starting_epoch * len(train_dataloader)
 
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
@@ -806,34 +827,46 @@ def main():
                         )
                     total_loss = 0
                     
+                # We save the model, optimizer, lr_scheduler, and seed states by calling `save_state`
+                # These are saved to folders named `step_{overall_step}`
+                # Will contain files: "pytorch_model.bin", "optimizer.bin", "scheduler.bin", and "random_states.pkl"
+                # If mixed precision was used, will also save a "scalar.bin" file
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
                         output_dir = f"step_{completed_steps}"
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
-                        save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+                        accelerator.save_state(output_dir)
+                        accelerator.wait_for_everyone()
+                        if accelerator.is_main_process:
+                            clean_checkpoints(args.output_dir, keep_n=1)
 
                 if completed_steps >= args.max_train_steps:
                     break
 
+        # We save the model, optimizer, lr_scheduler, and seed states by calling `save_state`
+        # These are saved to folders named `epoch_{epoch}`
+        # Will contain files: "pytorch_model.bin", "optimizer.bin", "scheduler.bin", and "random_states.pkl"
+        # If mixed precision was used, will also save a "scalar.bin" file
         if args.checkpointing_steps == "epoch":
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
-            save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+            accelerator.save_state(output_dir)
+            accelerator.wait_for_everyone()
+            if accelerator.is_main_process:
+                clean_checkpoints(args.output_dir, keep_n=1)
 
     if args.with_tracking:
         accelerator.end_training()
 
-    if args.output_dir is not None:
-        accelerator.wait_for_everyone()
-        if accelerator.is_main_process:
-            tokenizer.save_pretrained(args.output_dir)
-        save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
-
+    save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
+    accelerator.wait_for_everyone()
+    if accelerator.is_main_process:
+        clean_checkpoints(args.output_dir, keep_n=0)
 
     ## wpq: save args
-    with accelerator.main_process_first():
+    if accelerator.is_main_process:
         args_dict_path = args.output_dir+'.args.json'
         if os.path.isfile(args_dict_path) and os.path.isdir(args.output_dir):
             os.rename(args_dict_path, os.path.join(args.output_dir, 'ft_args.json'))
