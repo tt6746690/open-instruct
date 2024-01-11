@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import json
+import pickle
 import random
 from collections import defaultdict
 from copy import deepcopy
@@ -21,7 +22,7 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from datasets import load_dataset
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from tqdm.auto import tqdm
 import deepspeed
 import transformers
@@ -242,6 +243,18 @@ def parse_args(cmd=None):
         action='store_true',
         help='Use paged optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead).',
     )
+    parser.add_argument(
+        '--subsample_inds_file',
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        '--dataloader_sampler',
+        type=str,
+        choices=['RandomSampler', 'SequentialSampler'],
+        default='RandomSampler',
+    )
+
     if cmd is not None:
         from rosemary import jpt_parse_args
         args = jpt_parse_args(parser, cmd)
@@ -630,16 +643,28 @@ def main():
 
     train_dataset = lm_datasets
 
-    # # Log a few random samples from the training set:
-    # for index in random.sample(range(len(train_dataset)), 3):
-    #     logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
+    if args.subsample_inds_file is not None:
+        logger.info(f'Subsample dataset according to indices: {args.subsample_inds_file}')
+        with open(args.subsample_inds_file, 'rb') as f:
+            inds = pickle.load(f)['inds']
+        logger.info(f'subsample_inds_file has {len(inds)} indices.')
+        train_dataset = train_dataset.select(inds)
+
+
+    # wpq: add option to change sampler to allow for non-shuffled ordering of data
+    if args.dataloader_sampler == 'RandomSampler':
+        sampler = RandomSampler(train_dataset)
+    elif args.dataloader_sampler == 'SequentialSampler':
+        sampler = SequentialSampler(train_dataset)
+    else:
+        raise ValueError(f'{args.dataloader_sampler} not supported.')
 
     # DataLoaders creation:
     train_dataloader = DataLoader(
         train_dataset, 
-        shuffle=True, 
         collate_fn=DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest"),
-        batch_size=args.per_device_train_batch_size
+        batch_size=args.per_device_train_batch_size,
+        sampler=sampler,
     )
 
     # Optimizer
@@ -719,7 +744,11 @@ def main():
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("mitibm", experiment_config)
+        accelerator.init_trackers("mitibm", experiment_config, init_kwargs={
+                'wandb': {
+                    'name': args.output_dir.replace('results/', ''),
+                }
+            })
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -835,6 +864,7 @@ def main():
                                 "learning_rate": lr_scheduler.get_last_lr()[0],
                                 "train_loss": avg_loss,
                                 "step": completed_steps,
+                                "train/global_step": completed_steps,
                                 'logps_policy_chosen': logps['logps_policy_chosen'],
                                 'logps_policy_rejected': logps['logps_policy_rejected'],
                                 'logps_reference_chosen': logps['logps_reference_chosen'],
