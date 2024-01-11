@@ -391,10 +391,16 @@ def compute_correlations(xs, ys, corr_type='pearsonr'):
 
 
 def convert_example_to_str(idx, example):
-    import json
 
-    metadata = {k: v for k, v in example.items() if k!='messages'}
-    messages = example['messages']
+    if 'chosen' in example:
+        messages_key = 'chosen'
+    elif 'messages' in example:
+        messages_key = 'messages'
+    else:
+        raise ValueError(f'Cannot find `messages` or `chosen` in example')
+
+    metadata = {k: v for k, v in example.items() if k!='messages' and not isinstance(v, list)}
+    messages = example[messages_key]
     metadata['print_idx'] = idx
     metadata['n_turns'] = len(messages)
 
@@ -931,6 +937,20 @@ def get_alpacafarm_generations(save_dirs, filter_fn_name=None, task='alpacafarm_
     return df
 
 
+    
+def get_encode_fn_type(md, dataset):
+    """Get encode_fn_type given `md` and `dataset`.
+        - if dataset is ultrafeedback, always use `pref`.
+    """
+    if md is not None and any(x in md for x in ['mpnet', 'bge']):
+        return 'input'
+    else:
+        if dataset is not None and dataset in ['ultrafeedback']:
+            return 'pref'
+        else:
+            return 'sft'
+
+
 md_to_model_name = {
     'mpnet': 'all-mpnet-base-v2',
     'bge': 'bge-large-en-v1.5',
@@ -947,8 +967,17 @@ md_to_model_name.update({
     'llama7br256p4096': 'llama-7b+lora:r=256:a=4096+proj=4096',
     'llama7br512p4096': 'llama-7b+lora:r=512:a=11585+proj=4096',
     'pythia1br512p4096': 'pythia-1b+lora:r=512:a=11585+proj=4096',
+})
+
+# randsphere baselines 
+md_to_model_name.update({
     'randspherep4096': 'randspherep4096',
     'randspherep768': 'randspherep768',
+})
+
+# preference data
+md_to_model_name.update({
+    'llama7b+sharegptv2ep2+r512p4096': 'llama-7b+sharegptv2ep2+lora:r=512:a=11585+proj=4096',
 })
 
 

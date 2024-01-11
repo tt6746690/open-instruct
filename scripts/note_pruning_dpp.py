@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import sys
 
 from note_pruning_analysis import get_lm_output, get_dataset, scripts_dir, get_tokenizer_name_or_path, get_fast_tokenizer
-from note_pruning_analysis import md_to_model_name, get_full_model_name, curriculum_dir
+from note_pruning_analysis import md_to_model_name, get_full_model_name, curriculum_dir, get_encode_fn_type
 from note_curriculum import get_curriculum_scores
 
 
@@ -615,7 +615,7 @@ def compute_dppmap(
     dk = get_lm_output(
         dataset, 
         get_full_model_name(kernel_embed_model),
-        encode_fn_type='input' if kernel_embed_model in ['mpnet', 'bge'] else 'sft', 
+        encode_fn_type=get_encode_fn_type(kernel_embed_model, dataset), 
         return_text_embedding=True)
     X = dk[kernel_embed_type]
     if any(x in kernel_embed_model for x in ['mpnet', 'bge']) or kernel_type in ['vmf', 'lin']:
@@ -650,7 +650,7 @@ def compute_dppmap(
         dq = get_lm_output(
             dataset, 
             get_full_model_name(quality_score_embed_model),
-            encode_fn_type='input' if quality_score_embed_model in ['mpnet', 'bge'] else 'sft', 
+            encode_fn_type=get_encode_fn_type(quality_score_embed_model, dataset),
             return_text_embedding=True)
         if quality_score_type == 'prob':
             Q = dq['log_prob']

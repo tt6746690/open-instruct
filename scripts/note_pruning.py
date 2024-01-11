@@ -12,7 +12,7 @@ from transformers import AutoTokenizer
 
 from rosemary import parse_kv_from_string, create_string_from_kv
 from note_pruning_analysis import lm_output_dir, get_dataset_token_lengths, save_text_viz_for_curriculum, get_tokenizer_name_or_path, get_fast_tokenizer, save_to_pickle
-from note_pruning_analysis import get_lm_output, md_to_model_name, get_full_model_name
+from note_pruning_analysis import get_lm_output, md_to_model_name, get_full_model_name, get_encode_fn_type
 
 import note_pruning_dpp
 import note_pruning_clustering
@@ -260,10 +260,10 @@ def save_prune_results(save_dir, S, pkl_extra, sort_by, model_name, dataset):
         save_to_pickle(save_path=save_path, output=output)
         save_text_viz_for_curriculum(save_path)
 
-    
 
 def compute_ranking_copyover(sort_by, dataset, model_name):
-    d = get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embedding=False)
+    encode_fn_type = get_encode_fn_type(model_name, dataset)
+    d = get_lm_output(dataset, model_name, encode_fn_type=encode_fn_type, return_text_embedding=False)
     if sort_by not in d:
         raise ValueError(f'sort_by={sort_by} not in model output: ({dataset}, {model_name})')
     S = d[sort_by]
@@ -280,7 +280,8 @@ def compute_ranking_ifd_and_pmi(dataset, model_name):
 
 
 def compute_ranking_random(sort_by, dataset, model_name):
-    d = get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embedding=False)
+    encode_fn_type = get_encode_fn_type(model_name, dataset)
+    d = get_lm_output(dataset, model_name, encode_fn_type=encode_fn_type, return_text_embedding=False)
     N = d['log_prob'].shape[0]
     match = re.search(r's=(\d+)', sort_by)
     seed = int(match.group(1))
@@ -303,13 +304,14 @@ def compute_ranking_kmeans_dist_to_centroids(sort_by, dataset):
     dist_fn = 'l2' if sort_by.startswith('kmeansl2') else 'cd'
     n_clusters = kvs['nc']
     embed_type = re.sub(r'[+]', '_', kvs['emb'])
-    encode_fn_type='input' if kvs['md'] in ['mpnet', 'bge'] else 'sft'
+    encode_fn_type = get_encode_fn_type(kvs['md'], dataset)
     model_name = get_full_model_name(kvs['md'])
     d = get_lm_output(dataset, model_name, encode_fn_type=encode_fn_type, return_text_embedding=True)
     emb = d[embed_type]
     print(f'Running kmeans(n_clusters={n_clusters}) {{ {model_name}\'s {embed_type} }} to compute {"euclidean" if dist_fn == "l2" else "cosine"} distance to cluster centers.')
     S, kms = sort_kmeans_dist_to_cluster_centers(emb, n_clusters, dist_fn=dist_fn)
     return {sort_by: S}, {'kmeans': kms}
+
 
 
 def compute_ranking_semdedup(sort_by, dataset):
@@ -328,7 +330,7 @@ def compute_ranking_semdedup(sort_by, dataset):
     dist = kvs['dist']
     assert(dist in ['cd', 'l2'])
     embed_type = re.sub(r'[+]', '_', kvs['emb'])
-    encode_fn_type='input' if kvs['md'] in ['mpnet', 'bge'] else 'sft'
+    encode_fn_type = get_encode_fn_type(kvs['md'], dataset)
     save_dir_clustering = os.path.join('clustering', encode_fn_type, model_name, dataset, clustering_fn)
     os.makedirs(save_dir_clustering, exist_ok=True)
     # normalize embeddings to unit norm if the model that generated the embeddings does the 
@@ -369,7 +371,7 @@ def compute_ranking_dedup(sort_by, dataset):
     model_name = get_full_model_name(kvs['md'])
     dist = 'cd' if kvs['md'] in ['mpnet', 'bge'] else 'l2'
     embed_type = re.sub(r'[+]', '_', kvs['emb'])
-    encode_fn_type='input' if kvs['md'] in ['mpnet', 'bge'] else 'sft'
+    encode_fn_type = get_encode_fn_type(kvs['md'], dataset)
     d = get_lm_output(dataset, model_name, encode_fn_type=encode_fn_type, return_text_embedding=True)
     X = d[embed_type]
     Y = np.zeros(X.shape[0])
@@ -427,7 +429,7 @@ def compute_ranking_dppmapbd(sort_by, dataset):
         'emb': kvs['kemb'] if 'kemb' in kvs else 'text+embedding',
         'nc': kvs['nc'],
     })
-    encode_fn_type= 'input' if kvs['kmd'] in ['mpnet', 'bge'] else 'sft'
+    encode_fn_type = get_encode_fn_type(kvs['kmd'], dataset)
     save_dir_clustering = os.path.join(
         'clustering', encode_fn_type, model_name, dataset, clustering_fn)
     os.makedirs(save_dir_clustering, exist_ok=True)

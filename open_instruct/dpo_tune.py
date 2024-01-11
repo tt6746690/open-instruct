@@ -749,7 +749,12 @@ def main():
             args.resume_from_checkpoint = False
             logger.info(f"No checkpoint found in {args.output_dir}. Training from scratch.")
         else:
-            checkpoint_path = dirs[-1]
+            # if previous training interrupted during `accelerator.save_state`, there will be two checkpoints, 
+            # with the newer checkpoint being incomplete. We want to load the older checkpoint.
+            if len(dirs) == 2:
+                checkpoint_path = dirs[0]
+            else:
+                checkpoint_path = dirs[-1]
             accelerator.load_state(checkpoint_path)
             accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
             # Extract `epoch_{i}` or `step_{i}`
