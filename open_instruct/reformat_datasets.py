@@ -762,6 +762,71 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000, version='wiz
 
 
 
+
+def convert_openai_summarization_data(data_dir, output_dir):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_openai_summarization_data
+        data_dir = 'data/raw_train/openai_summarization'
+        output_dir = 'data/processed/openai_summarization'
+        convert_openai_summarization_data(data_dir, output_dir)
+        ```
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    dataset = 'openai_summarization'
+
+    def convert(source_filename, target_filename):
+        df = pd.read_parquet(os.path.join(data_dir, source_filename))    
+        examples = [row.to_dict() for _, row in df.iterrows()]
+        def get_unique_ids_subset(L):
+            random.seed(0)
+            ids = set()
+            S = []
+            random.shuffle(L)
+            for x in L:
+                xid = x["info"]["id"]
+                if xid not in ids and xid is not None:
+                    ids.add(xid)
+                    S.append(x)
+            return S
+        examples = get_unique_ids_subset(examples)
+        def convert_example_to_messages(example):
+            post = example["info"]["post"]
+            choice = example["choice"]
+            answer_chosen = example["summaries"][choice]["text"]
+            answer_rejected = example["summaries"][1-choice]["text"]
+            return {
+                "dataset": dataset,
+                "id": dataset+'_'+example["info"]["id"],
+                "chosen": [
+                    {"role": "user", "content": post},
+                    {"role": "assistant", "content": answer_chosen},
+                ],
+                "rejected": [
+                    {"role": "user", "content": post},
+                    {"role": "assistant", "content": answer_rejected},
+                ]
+            }
+        examples = [convert_example_to_messages(x) for x in examples]
+        output_path = os.path.join(output_dir, target_filename)
+        with open(output_path, 'w') as fout:
+            for idx, example in enumerate(examples):
+                fout.write(json.dumps(example) + "\n")
+        
+        print(f"Filtering {dataset} to max_seq_length=2048...")
+        filter_json_by_numtoks(output_path, max_seq_length=2048)
+
+
+    for source_filename, target_filename in [
+        ("openai_summarize_from_feedback_train.parquet", 
+         "openai_summarization_train_data.jsonl"),
+        ("openai_summarize_from_feedback_validation.parquet", 
+         "openai_summarization_vadlidation_data.jsonl"),
+    ]:
+        convert(source_filename, target_filename)
+        
+
+
 def convert_ultrafeedback_data(data_dir, output_dir):
     """Currently use cleaned version from allenai
             ultrafeedback: allenai/ultrafeedback_binarized_cleaned

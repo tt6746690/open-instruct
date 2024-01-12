@@ -155,8 +155,16 @@ echo "Downloading the Alpagasus dataset..."
 wget -P data/raw_train/alpagasus https://raw.githubusercontent.com/gpt4life/alpagasus/main/data/filtered/chatgpt_9k.json
 
 
+## preference dataset
+
 echo "Downloading the UltraFeedback dataset..."
 wget -P data/raw_train/ultrafeedback/ https://huggingface.co/datasets/allenai/ultrafeedback_binarized_cleaned/resolve/main/data/train_prefs-00000-of-00001.parquet?download=true -O data/raw_train/ultrafeedback/allenai_ultrafeedback_binarized_cleaned_train_prefs.parquet
+
+
+echo "Downloading the openai/summarize_from_feedback dataset..."
+mkdir -p data/raw_train/openai_summarization/
+wget -P data/raw_train/openai_summarization/ https://huggingface.co/datasets/openai/summarize_from_feedback/resolve/refs%2Fconvert%2Fparquet/comparisons/train/0000.parquet?download=true -O data/raw_train/openai_summarization/openai_summarize_from_feedback_train.parquet
+wget -P data/raw_train/openai_summarization/ https://huggingface.co/datasets/openai/summarize_from_feedback/resolve/refs%2Fconvert%2Fparquet/comparisons/validation/0000.parquet?download=true -O data/raw_train/openai_summarization/openai_summarize_from_feedback_validation.parquet
 
 
 echo "Processing datasets..."

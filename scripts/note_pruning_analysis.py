@@ -72,6 +72,22 @@ def get_dataset_size(data_dir = 'data/processed'):
     df['length'] = df['length'].apply(lambda x: '{:,.0f}'.format(x))
     return df
 
+dataset_with_multiple_version = [
+    'tulu_v1',
+    'tulu_v2',
+    'tulu',
+    'flan2022', 
+    'starcoder',
+    'open_orca',
+    'sharegpt',
+    'wizardlm',
+    'openai_summarization',
+]
+
+dataset_with_train_val_split = [
+    'ultrachat200k',
+    'openai_summarization',
+]
 
     
 def get_dataset(dataset, processed=True):
@@ -79,25 +95,14 @@ def get_dataset(dataset, processed=True):
         train_file = dataset
     else:
         if processed:
-            if dataset in ['tulu_v1', 'tulu_v2']:
-                train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
-            elif 'tulu' in dataset:
-                train_file = os.path.join(processed_dir, 'tulu', f'{dataset}.jsonl')
-            elif 'flan2022' in dataset:
-                train_file = os.path.join(processed_dir, 'flan2022', f'{dataset}_data.jsonl')
-            elif 'ultrachat' in dataset:
-                if dataset.startswith('ultrachat200k'):
-                    train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_train_data.jsonl')
-                else:
-                    train_file = os.path.join(processed_dir, 'ultrachat', f'{dataset}_data.jsonl')
-            elif 'starcoder' in dataset:
-                train_file = os.path.join(processed_dir, 'starcoder', f'{dataset}.jsonl')
-            elif 'open_orca' in dataset:
-                train_file = os.path.join(processed_dir, 'open_orca', f'{dataset}_data.jsonl')
-            elif 'sharegpt' in dataset:
-                train_file = os.path.join(processed_dir, 'sharegpt', f'{dataset}_data.jsonl')
-            elif 'wizardlm' in dataset:
-                train_file = os.path.join(processed_dir, 'wizardlm', f'{dataset}_data.jsonl')
+            has_multiple_versions = [x in dataset for x in dataset_with_multiple_version]
+            if any(has_multiple_versions):
+                dataset_dir = dataset_dir = dataset_with_multiple_version[has_multiple_versions.index(True)]
+                if any(dataset.startswith(x) for x in dataset_with_train_val_split):
+                    dataset += '_train'
+                if 'starcoder' not in dataset:
+                    dataset += '_data'
+                train_file = os.path.join(processed_dir, dataset_dir, f'{dataset}.jsonl')
             else:
                 train_file = os.path.join(processed_dir, dataset, f'{dataset}_data.jsonl')
         else:
