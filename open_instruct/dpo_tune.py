@@ -347,6 +347,27 @@ def encode_with_messages_format(example, tokenizer, max_seq_length):
     }
 
 
+
+def rename_state_dict_file_if_model_is_sharded(folder):
+    from transformers.utils import WEIGHTS_NAME, WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_INDEX_NAME
+    from transformers.utils import is_safetensors_available
+
+    # Load the index
+    weights_file = os.path.join(folder, WEIGHTS_NAME)
+    index_file = os.path.join(folder, WEIGHTS_INDEX_NAME)
+    safe_index_file = os.path.join(folder, SAFE_WEIGHTS_INDEX_NAME)
+    weights_present = os.path.isfile(weights_file)
+    index_present = os.path.isfile(index_file)
+    safe_index_present = os.path.isfile(safe_index_file)
+    is_sharded = index_present or (safe_index_present and is_safetensors_available())
+    if weights_present and is_sharded:
+        weights_name_new = WEIGHTS_NAME+'.renamed_to_load_model_properly'
+        print(f'both {WEIGHTS_NAME} and model shards exists under {folder}.\n'
+              f'Rename {WEIGHTS_NAME} -> {weights_name_new}')
+        os.rename(weights_file, os.path.join(folder, weights_name_new))
+
+
+
 def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
     ## wpq: reference https://github.com/huggingface/accelerate/blob/v0.21.0/examples/by_feature/deepspeed_with_config_support.py#L707
     # 
@@ -369,8 +390,15 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
             unwrapped_model.save_pretrained(output_dir, state_dict=state_dict)
     else:
         unwrapped_model.save_pretrained(
-            output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict, safe_serialization=False # errors with safetensors...
+            output_dir,
+            is_main_process=accelerator.is_main_process,
+            save_function=accelerator.save,
+            state_dict=state_dict,
+            safe_serialization=False # errors with safetensors...
         )
+    # wpq: both `pytorch_model.bin` (without containing actual weights) and its sharded are present, rename `pytorch_model.bin` so that `from_pretrained` can load the model properly from model shards.
+    if accelerator.is_main_process:
+        rename_state_dict_file_if_model_is_sharded(output_dir)
 
 
 # from trl, we have to prep the ref model separately.
@@ -405,18 +433,23 @@ def prepare_deepspeed(accelerator, model):
         return model
         
 
-def clean_checkpoints(output_dir, keep_n=1):
-    import shutil
-    dirs = glob.glob(os.path.join(output_dir, 'step_*')) + \
-        glob.glob(os.path.join(output_dir, 'epoch_*'))
-    dirs = [x for x in dirs if os.path.isdir(x)]
-    dirs.sort(key=os.path.getctime) # Sorts folders by date modified
-    dirs_remove = dirs[:len(dirs)-keep_n] if keep_n < len(dirs) else []
-    dirs_keep = dirs[len(dirs)-keep_n:] if keep_n < len(dirs) else dirs
-    logger.info(f'Cleaning checkpoints. Keeping {dirs_keep} and removing {dirs_remove}')
-    for d in dirs_remove:
-        shutil.rmtree(d)
-    return dirs_keep
+def clean_checkpoints(accelerator, output_dir, keep_n=1):
+    accelerator.wait_for_everyone()
+    if accelerator.is_main_process:
+        import shutil
+        dirs = glob.glob(os.path.join(output_dir, 'step_*')) + \
+            glob.glob(os.path.join(output_dir, 'epoch_*'))
+        dirs = [x for x in dirs if os.path.isdir(x)]
+        dirs.sort(key=os.path.getctime) # Sorts folders by date modified
+        dirs_remove = dirs[:len(dirs)-keep_n] if keep_n < len(dirs) else []
+        dirs_keep = dirs[len(dirs)-keep_n:] if keep_n < len(dirs) else dirs
+        logger.info(f'Cleaning checkpoints. Keeping {dirs_keep} and removing {dirs_remove}')
+        for d in dirs_remove:
+            shutil.rmtree(d)
+        return dirs_keep
+    else:
+        return None
+    
 
 
 def main():
@@ -884,9 +917,7 @@ def main():
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
                         accelerator.save_state(output_dir)
-                        accelerator.wait_for_everyone()
-                        if accelerator.is_main_process:
-                            clean_checkpoints(args.output_dir, keep_n=1)
+                        clean_checkpoints(accelerator, args.output_dir, keep_n=1)
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -900,17 +931,14 @@ def main():
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
             accelerator.save_state(output_dir)
-            accelerator.wait_for_everyone()
-            if accelerator.is_main_process:
-                clean_checkpoints(args.output_dir, keep_n=1)
+            clean_checkpoints(accelerator, args.output_dir, keep_n=1)
 
     if args.with_tracking:
         accelerator.end_training()
 
+    accelerator.save_state(os.path.join(args.output_dir, 'checkpoint-last'))
     save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
-    accelerator.wait_for_everyone()
-    if accelerator.is_main_process:
-        clean_checkpoints(args.output_dir, keep_n=0)
+    clean_checkpoints(accelerator, args.output_dir, keep_n=1)
 
     ## wpq: save args
     if accelerator.is_main_process:
