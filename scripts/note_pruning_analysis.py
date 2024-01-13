@@ -81,14 +81,12 @@ dataset_with_multiple_version = [
     'open_orca',
     'sharegpt',
     'wizardlm',
-    'openai_summarization',
+    'ultrafeedback',
 ]
 
 dataset_with_train_val_split = [
     'ultrachat200k',
-    'openai_summarization',
 ]
-
     
 def get_dataset(dataset, processed=True):
     if dataset.endswith(('jsonl', 'json')):
@@ -677,10 +675,17 @@ def get_fast_tokenizer(model_name_or_path):
 
 
 
-def filter_examples_by_numtoks(examples, tokenizer_name_or_path, num_proc=32, max_seq_length=2048):
+def filter_examples_by_numtoks(examples, tokenizer_name='llama', num_proc=64, max_seq_length=2048):
     ## given a list of examples, filter them so that when applied 
     # the chat template, will be shorter than `max_seq_length`.
     from datasets import Dataset
+    
+    if tokenizer_name.startswith('llama'):
+        tokenizer_name_or_path = get_tokenizer_name_or_path('llama-7b')
+    elif tokenizer_name.startswith('codellama'):
+        tokenizer_name_or_path = get_tokenizer_name_or_path('codellama-7b')
+    else:
+        raise ValueError(f'Unknown tokenizer_name={tokenizer_name}')
 
     tokenizer = get_fast_tokenizer(tokenizer_name_or_path)
     ds = Dataset.from_list(examples)
@@ -717,6 +722,7 @@ def filter_examples_by_numtoks(examples, tokenizer_name_or_path, num_proc=32, ma
     return examples
 
 
+
 def filter_json_by_numtoks(jsonl_path, tokenizer_name='llama7b', max_seq_length=2048):
     """Filter dataset specified by `jsonl_path`,
         so that each example when applied tulu's chat template has numtoks < `max_seq_length`.
@@ -726,16 +732,9 @@ def filter_json_by_numtoks(jsonl_path, tokenizer_name='llama7b', max_seq_length=
         for line in f:
             examples.append(json.loads(line))
 
-    if tokenizer_name.startswith('llama'):
-        tokenizer_name_or_path = get_tokenizer_name_or_path('llama-7b')
-    elif tokenizer_name.startswith('codellama'):
-        tokenizer_name_or_path = get_tokenizer_name_or_path('codellama-7b')
-    else:
-        raise ValueError(f'Unknown tokenizer_name={tokenizer_name}')
-
     examples = filter_examples_by_numtoks(
         examples,
-        tokenizer_name_or_path=tokenizer_name_or_path,
+        tokenizer_name=tokenizer_name,
         max_seq_length=max_seq_length,
         num_proc=64)
 

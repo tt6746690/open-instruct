@@ -762,72 +762,177 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000, version='wiz
 
 
 
-
-def convert_openai_summarization_data(data_dir, output_dir):
+def convert_shp_data(data_dir, output_dir, num_examples=None):
     """
         ```
-        from open_instruct.reformat_datasets import convert_openai_summarization_data
-        data_dir = 'data/raw_train/openai_summarization'
-        output_dir = 'data/processed/openai_summarization'
-        convert_openai_summarization_data(data_dir, output_dir)
+        from open_instruct.reformat_datasets import convert_shp_data
+        data_dir = 'data/raw_train/shp'
+        output_dir = 'data/processed/shp'
+        convert_shp_data(data_dir, output_dir, num_examples=50_000)
         ```
     """
     os.makedirs(output_dir, exist_ok=True)
-    dataset = 'openai_summarization'
+    dataset = 'shp'
 
-    def convert(source_filename, target_filename):
-        df = pd.read_parquet(os.path.join(data_dir, source_filename))    
-        examples = [row.to_dict() for _, row in df.iterrows()]
-        def get_unique_ids_subset(L):
-            random.seed(0)
-            ids = set()
-            S = []
-            random.shuffle(L)
-            for x in L:
-                xid = x["info"]["id"]
-                if xid not in ids and xid is not None:
-                    ids.add(xid)
-                    S.append(x)
-            return S
-        examples = get_unique_ids_subset(examples)
-        def convert_example_to_messages(example):
-            post = example["info"]["post"]
-            choice = example["choice"]
-            answer_chosen = example["summaries"][choice]["text"]
-            answer_rejected = example["summaries"][1-choice]["text"]
-            return {
-                "dataset": dataset,
-                "id": dataset+'_'+example["info"]["id"],
-                "chosen": [
-                    {"role": "user", "content": post},
-                    {"role": "assistant", "content": answer_chosen},
-                ],
-                "rejected": [
-                    {"role": "user", "content": post},
-                    {"role": "assistant", "content": answer_rejected},
-                ]
-            }
-        examples = [convert_example_to_messages(x) for x in examples]
-        output_path = os.path.join(output_dir, target_filename)
-        with open(output_path, 'w') as fout:
-            for idx, example in enumerate(examples):
-                fout.write(json.dumps(example) + "\n")
-        
-        print(f"Filtering {dataset} to max_seq_length=2048...")
-        filter_json_by_numtoks(output_path, max_seq_length=2048)
+    source_filenames = [
+        'shp_train_0.parquet',
+        'shp_train_1.parquet'
+    ]
+    target_filename = 'shp_data.jsonl'
 
+    dfs = []
+    for x in source_filenames:
+        df = pd.read_parquet(os.path.join(data_dir, x))
+        dfs.append(df)
+    df = pd.concat(dfs, axis=0)
+    if num_examples is not None:
+        df = df.sample(n=int(num_examples*1.1), random_state=0)
+    examples = [row.to_dict() for _, row in df.iterrows()]
 
-    for source_filename, target_filename in [
-        ("openai_summarize_from_feedback_train.parquet", 
-         "openai_summarization_train_data.jsonl"),
-        ("openai_summarize_from_feedback_validation.parquet", 
-         "openai_summarization_vadlidation_data.jsonl"),
-    ]:
-        convert(source_filename, target_filename)
-        
+    def convert_example_to_messages(example):
+        answer_chosen = example['human_ref_A'] if example['labels'] == 1 else example['human_ref_B']
+        answer_rejected = example['human_ref_A'] if example['labels'] == 0 else example['human_ref_B']
+        return {
+            'dataset': dataset,
+            'id': f"{dataset}_{example['post_id']}",
+            'chosen': [
+                {'role': 'user', 'content': example['history']},
+                {'role': 'assistant', 'content': answer_chosen},
+            ],
+            'rejected': [
+                {'role': 'user', 'content': example['history']},
+                {'role': 'assistant', 'content': answer_rejected},
+            ],
+        }
+    examples = [convert_example_to_messages(x) for x in examples]
+    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
+    with open(output_path, 'w') as fout:
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
 
 
-def convert_ultrafeedback_data(data_dir, output_dir):
+
+def convert_hh_rlhf_data(data_dir, output_dir, num_examples=None):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_hh_rlhf_data
+        data_dir = 'data/raw_train/hh_rlhf'
+        output_dir = 'data/processed/hh_rlhf'
+        convert_hh_rlhf_data(data_dir, output_dir, num_examples=50_000)
+        ```
+    """
+
+    os.makedirs(output_dir, exist_ok=True)
+    dataset = 'hh_rlhf'
+
+    source_filename = 'hh_rlhf_train.parquet'
+    target_filename = f'{dataset}_data.jsonl'
+
+    df = pd.read_parquet(os.path.join(data_dir, source_filename))
+    if num_examples is not None:
+        df = df.sample(n=int(num_examples*1.1), random_state=0)
+    examples = [row.to_dict() for _, row in df.iterrows()]
+    roles = {'human': 'user', 'assistant': 'assistant'}
+    def convert_example_to_messages(example, index):
+        chosen = [{'role': roles[x['role']], 'content': x['text']} 
+                    for x in example['context'].tolist() + [example['chosen']]]
+        rejected = [{'role': roles[x['role']], 'content': x['text']} 
+                    for x in example['context'].tolist() + [example['rejected']]]
+        assert(len(chosen) % 2 == 0 and len(rejected) % 2 == 0)
+        example = {
+            'dataset': dataset,
+            'id': f'{dataset}_{index}',
+            'chosen': chosen,
+            'rejected': rejected,
+        }
+        return example
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
+    with open(output_path, 'w') as fout:
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
+
+
+def get_unique_ids_subset(L):
+    random.seed(0)
+    ids = set()
+    S = []
+    random.shuffle(L)
+    for x in L:
+        xid = x["info"]["id"]
+        if xid not in ids and xid is not None:
+            ids.add(xid)
+            S.append(x)
+    return S
+
+
+
+def convert_openai_sum_data(data_dir, output_dir, num_examples=None):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_openai_sum_data
+        data_dir = 'data/raw_train/openai_sum'
+        output_dir = 'data/processed/openai_sum'
+        convert_openai_sum_data(data_dir, output_dir, num_examples=50_000)
+        ```
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    dataset = 'openai_sum'
+
+    source_filename = 'openai_summarize_from_feedback_train.parquet'
+    target_filename = 'openai_sum_data.jsonl'
+
+    df = pd.read_parquet(os.path.join(data_dir, source_filename))
+    if num_examples is not None:
+        df = df.sample(n=int(num_examples*1.1), random_state=0)
+    examples = [row.to_dict() for _, row in df.iterrows()]
+    def convert_example_to_messages(example):
+        post = example["info"]["post"]
+        choice = example["choice"]
+        answer_chosen = example["summaries"][choice]["text"]
+        answer_rejected = example["summaries"][1-choice]["text"]
+        return {
+            "dataset": dataset,
+            "id": dataset+'_'+example["info"]["id"],
+            "chosen": [
+                {"role": "user", "content": post},
+                {"role": "assistant", "content": answer_chosen},
+            ],
+            "rejected": [
+                {"role": "user", "content": post},
+                {"role": "assistant", "content": answer_rejected},
+            ]
+        }
+    examples = [convert_example_to_messages(x) for x in examples]
+    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
+    with open(output_path, 'w') as fout:
+        for idx, example in enumerate(examples):
+            fout.write(json.dumps(example) + "\n")
+    
+
+
+def convert_ultrafeedback_data(data_dir, output_dir, num_examples=None):
     """Currently use cleaned version from allenai
             ultrafeedback: allenai/ultrafeedback_binarized_cleaned
 
@@ -835,31 +940,41 @@ def convert_ultrafeedback_data(data_dir, output_dir):
         from open_instruct.reformat_datasets import convert_ultrafeedback_data
         data_dir = 'data/raw_train/ultrafeedback'
         output_dir = 'data/processed/ultrafeedback'
-        convert_ultrafeedback_data(data_dir, output_dir)
+        convert_ultrafeedback_data(data_dir, output_dir, num_examples=50_000)
         ```
     """
     os.makedirs(output_dir, exist_ok=True)
-
     dataset = 'ultrafeedback'
-    df = pd.read_parquet(os.path.join(data_dir, "allenai_ultrafeedback_binarized_cleaned_train_prefs.parquet"))    
-    examples = [row.to_dict() for _, row in df.iterrows()]
 
-    output_path = os.path.join(output_dir, f'{dataset}_data.jsonl')
+    source_filename = 'allenai_ultrafeedback_binarized_cleaned_train_prefs.parquet'
+    target_filename = f'{dataset}_data.jsonl'
+
+    df = pd.read_parquet(os.path.join(data_dir, source_filename))
+    if num_examples is not None:
+        df = df.sample(n=int(num_examples*1.1), random_state=0)
+    examples = [row.to_dict() for _, row in df.iterrows()]
+    def convert_example_to_messages(example, index):
+        return {
+            'dataset': dataset,
+            'id': f'{dataset}_{index}',
+            'chosen': example['chosen'].tolist(),
+            'rejected': example['rejected'].tolist(),
+            'score_chosen': example['score_chosen'],
+            'score_rejected': example['score_rejected'],
+            'source': example['source'],
+        }
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
     with open(output_path, 'w') as fout:
-        for idx, example in enumerate(examples):
-            fout.write(json.dumps({
-                'dataset': dataset,
-                'prompt': example['prompt'],
-                'chosen': example['chosen'].tolist(),
-                'rejected': example['rejected'].tolist(),
-                'score_chosen': example['score_chosen'],
-                'score_rejected': example['score_rejected'],
-                'source': example['source'],
-            }) + "\n")
-            
-    print(f"Filtering {dataset} to max_seq_length=2048...")
-    filepath = os.path.join(output_dir, f"{dataset}_data.jsonl")
-    filter_json_by_numtoks(filepath, max_seq_length=2048)
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
 
 
 

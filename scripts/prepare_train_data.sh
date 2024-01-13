@@ -162,9 +162,22 @@ wget -P data/raw_train/ultrafeedback/ https://huggingface.co/datasets/allenai/ul
 
 
 echo "Downloading the openai/summarize_from_feedback dataset..."
-mkdir -p data/raw_train/openai_summarization/
-wget -P data/raw_train/openai_summarization/ https://huggingface.co/datasets/openai/summarize_from_feedback/resolve/refs%2Fconvert%2Fparquet/comparisons/train/0000.parquet?download=true -O data/raw_train/openai_summarization/openai_summarize_from_feedback_train.parquet
-wget -P data/raw_train/openai_summarization/ https://huggingface.co/datasets/openai/summarize_from_feedback/resolve/refs%2Fconvert%2Fparquet/comparisons/validation/0000.parquet?download=true -O data/raw_train/openai_summarization/openai_summarize_from_feedback_validation.parquet
+mkdir -p data/raw_train/openai_sum/
+wget -P data/raw_train/openai_sum/ https://huggingface.co/datasets/openai/summarize_from_feedback/resolve/refs%2Fconvert%2Fparquet/comparisons/train/0000.parquet?download=true -O data/raw_train/openai_sum/openai_summarize_from_feedback_train.parquet
+wget -P data/raw_train/openai_sum/ https://huggingface.co/datasets/openai/summarize_from_feedback/resolve/refs%2Fconvert%2Fparquet/comparisons/validation/0000.parquet?download=true -O data/raw_train/openai_sum/openai_summarize_from_feedback_validation.parquet
+
+
+echo "Downloading the HH-RLHF dataset..."
+mkdir -p data/raw_train/hh_rlhf/
+wget -P data/raw_train/hh_rlhf/ https://huggingface.co/datasets/PKU-Alignment/processed-hh-rlhf/resolve/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/hh_rlhf/hh_rlhf_train.parquet
+wget -P data/raw_train/hh_rlhf/ https://huggingface.co/datasets/PKU-Alignment/processed-hh-rlhf/resolve/refs%2Fconvert%2Fparquet/default/test/0000.parquet?download=true -O data/raw_train/hh_rlhf/hh_rlhf_test.parquet
+
+
+echo "Downloading SHP dataset..."
+mkdir -p data/raw_train/shp/
+wget -P data/raw_train/shp/ https://huggingface.co/datasets/stanfordnlp/SHP/resolve/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/shp/shp_train_0.parquet
+wget -P data/raw_train/shp/ https://huggingface.co/datasets/stanfordnlp/SHP/resolve/refs%2Fconvert%2Fparquet/default/train/0001.parquet?download=true -O data/raw_train/shp/shp_train_1.parquet
+
 
 
 echo "Processing datasets..."
