@@ -1,44 +1,37 @@
-# -e /gpfs/u/scratch/PTFM/PTFMqngp/github/rosemary
--e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023
-# wpq: added torch version
+-e .
+-e ../../../mitibm2023
+-e ../alpaca_eval # some bug fixes on repetitive generation yielding openai errors
+-e ../rosemary
+-e ../DPPy
 --extra-index-url https://download.pytorch.org/whl/cu118
-torch # torch=2.1.0+cu18
+torch==2.1.2+cu118
 scipy
-packaging
 packaging
 sentencepiece
 datasets
 deepspeed>=0.10.0
-accelerate>=0.21.0,<0.23.0  # 0.23.0 will cause an incorrect learning rate schedule when using deepspeed, which is likely caused by https://github.com/huggingface/accelerate/commit/727d624322c67db66a43c559d8c86414d5ffb537
+accelerate==0.21.0 # >=0.21.0,<0.23.0  # 0.23.0 will cause an incorrect learning rate schedule when using deepspeed, which is likely caused by https://github.com/huggingface/accelerate/commit/727d624322c67db66a43c559d8c86414d5ffb537
 peft>=0.4.0
 bitsandbytes>=0.41.1
 evaluate>=0.4.0
 tokenizers>=0.13.3
 protobuf
--e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/transformers
+transformers==4.35.2
 huggingface_hub
 openai<=0.28.1
 tiktoken
 rouge_score
 wandb
-gradio==3.50.2
 termcolor
 jsonlines
-unidic-lite
 einops
-# wpq: gives cuda version 12.1 mismatch with version pytorch is compiled with (11.8) error and it doesn't seem to be an easy fix.
-# open-instruct uses flash-attn for llama model. so fix this if I need to use llama for anything.
-# flash-attn==2.2.2
+flash-attn
 scipy
 auto-gptq
 fire
--e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/alpaca_eval # custom bug fixes
-# for human eval web app
 flask
 vllm 
 openpyxl
-# wpq: for mosaicml/mpt-7b
-# triton-pre-mlir@git+https://github.com/vchiley/triton.git@triton_pre_mlir_sm90#subdirectory=python
 tensorboard
 omegaconf
 pynvml
@@ -48,5 +41,4 @@ matplotlib
 tensorboard
 faiss-gpu
 hdbscan
--e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/DPPy
 openpyxl

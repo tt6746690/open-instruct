@@ -4,7 +4,7 @@
 results
 models
 wandb
-data/*
+data
 scripts/text_viz/
 scripts/clustering/
 scripts/dpp
