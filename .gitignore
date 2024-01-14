@@ -8,6 +8,7 @@ data
 scripts/text_viz/
 scripts/clustering/
 scripts/dpp
+scripts/curriculum
 .deepspeed_env
 
 # !data/processed

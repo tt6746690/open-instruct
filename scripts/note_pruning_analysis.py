@@ -36,11 +36,12 @@ lm_output_dir = os.path.join(scripts_dir, 'model_outputs')
 text_viz_path = os.path.join(scripts_dir, 'text_viz')
 curriculum_dir = os.path.join(scripts_dir, 'curriculum')
 
-def save_to_pickle(save_path, output):
-    if 'inds' in output:
+def save_to_pickle(save_path, output, verbose=True):
+    if verbose and 'inds' in output:
         print(f'save inds (length = {len(output["inds"])}) to {save_path}')
     with open(save_path, 'wb') as f:
         pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 def get_dataset_size(data_dir = 'data/processed'):
     """

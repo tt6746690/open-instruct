@@ -33,7 +33,6 @@ def convert_existing_data_inds_to_curriculum_scores():
         sort_by = sort_by.split('_incr')[0]
         for pacing_fn in [sort_by, sort_by+'_neg']:
             curriculum_output_dir = os.path.join('curriculum', model_name, dataset, pacing_fn)
-            print(curriculum_output_dir)
             os.makedirs(curriculum_output_dir, exist_ok=True)
             save_path = os.path.join(curriculum_output_dir, 'scores.pkl')
             output = {'S': -S if pacing_fn.endswith('_neg') else S}
@@ -167,7 +166,9 @@ def generate_curriculum(path, pacing_fn, verbose=False, save_output=True):
         sizes.append(int(M-np.sum(sizes)))
 
         if max(sizes) >= len(inds_sorted):
-            raise ValueError(f'len(number of unique data point)={max(sizes)} > len(inds)={len(inds_sorted)}')
+            print(f'len(number of unique data point)={max(sizes)} > len(inds)={len(inds_sorted)} for\n'
+                             f'path={path}, pacing_fn={pacing_fn}')
+            return None
         
         inds = []
         for size in sizes:
@@ -212,7 +213,7 @@ def generate_curriculum(path, pacing_fn, verbose=False, save_output=True):
 
         if verbose:
             print(f'fixed exponential pacing startingfrac={startingfrac}, inc={inc}, nsteps={nsteps} \n'
-                f'Implies: step_lens={step_lens}, stepwise_data_fracs={stepwise_data_fracs}')
+                  f'Implies: step_lens={step_lens}, stepwise_data_fracs={stepwise_data_fracs}')
         inds = []
         for step_len, stepwise_data_frac in zip(step_lens, stepwise_data_fracs):
             inds_sample_from = list(inds_to_inds_sorted[:int(stepwise_data_frac*N)])
@@ -228,7 +229,7 @@ def generate_curriculum(path, pacing_fn, verbose=False, save_output=True):
     output['inds'] = inds
     save_path = os.path.join(os.path.dirname(path), 'inds_'+pacing_fn+'.pkl')
     if save_output:
-        save_to_pickle(save_path, output)
+        save_to_pickle(save_path, output, verbose=False)
 
     fn_output = {
         'output': output,
@@ -272,6 +273,7 @@ def generate_curriculum_forall_scoring_fn(
     output_list = []
     for path, pacing_fn in itertools.product(paths, pacing_fn_list):
         output = generate_curriculum(path, pacing_fn, verbose=verbose)
+        if output is None: continue
         output_list.append(output)
     return output_list
 
