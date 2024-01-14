@@ -10,7 +10,7 @@ packaging
 sentencepiece
 datasets
 deepspeed>=0.10.0
-accelerate==0.21.0 # >=0.21.0,<0.23.0  # 0.23.0 will cause an incorrect learning rate schedule when using deepspeed, which is likely caused by https://github.com/huggingface/accelerate/commit/727d624322c67db66a43c559d8c86414d5ffb537
+accelerate==0.22.0 # >=0.21.0,<0.23.0  # 0.23.0 will cause an incorrect learning rate schedule when using deepspeed, which is likely caused by https://github.com/huggingface/accelerate/commit/727d624322c67db66a43c559d8c86414d5ffb537
 peft>=0.4.0
 # bitsandbytes>=0.41.1 # remove since not using it.
 evaluate>=0.4.0

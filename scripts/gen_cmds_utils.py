@@ -53,23 +53,25 @@ def get_chat_formatting_function(model_name_or_path):
     return chat_formatting_function
 
 
+
+
 def get_resource_for_task(task_name, model_name_or_path):
+    """Returns batch_size, job_duration. """
+    from llm.submit import get_host_info
+    arch = get_host_info()['arch']
     model_name_or_path = model_name_or_path.lower()
-    if any(x in model_name_or_path for x in ['gpt2-medium', 'pythia-160m']):
-        return 50, 1
-    if any(x in model_name_or_path for x in ['gpt-xl']):
-        if any(x in task_name for x in ['bbh_s=3', 'mmlu_s=5', 'tydiqa_s=1_gp']):
-            return 16, 1
-        else:
-            return 32, 1
-    if any(x in model_name_or_path for x in ['llama', 'mistral', 'zephyr', 'pythia-1.4b', 'pythia-2.8b']):
-        if any(x in task_name for x in ['bbh_s=3', 'mmlu_s=5', 'tydiqa_s=1_gp', 'alpacafarm']):
-            return 5, 1
-        else:
-            return 10, 1
-    if any(x in model_name_or_path for x in ['pythia-6.9b', 'dolly-v2-7b']):
-        if any(x in task_name for x in ['bbh_s=3', 'mmlu_s=5', 'mmlu_s=0', 'tydiqa_s=1_gp', 'alpacafarm']):
-            return 4, 1
-        else:
-            return 10, 1
-    return 10, 1
+
+    models_7b = ['llama', 'mistral', 'zephyr']
+
+    if arch == 'x86_64': # ccc use vllm
+        if any(x in model_name_or_path for x in models_7b):
+            batch_size, job_duration = 10, 1
+            if any(x in task_name for x in ['alpacafarm']):
+                job_duration = 6
+    else:
+        if any(x in model_name_or_path for x in models_7b):
+            if any(x in task_name for x in ['bbh_s=3', 'mmlu_s=5', 'tydiqa_s=1_gp', 'alpacafarm']):
+                batch_size, job_duration = 5, 1
+            else:
+                batch_size, job_duration = 10, 1
+    return batch_size, job_duration
