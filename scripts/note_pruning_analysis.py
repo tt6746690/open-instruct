@@ -24,8 +24,10 @@ from transformers import AutoTokenizer
 from datasets import load_dataset
 
 
-open_instruct_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/'
-assets_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/assets/'
+open_instruct_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+mitibm_dir = os.path.dirname(os.path.dirname(open_instruct_dir))
+cache_dir = os.path.join(mitibm_dir, 'cache')
+assets_dir = os.path.join(mitibm_dir, 'assets')
 scripts_dir = os.path.join(open_instruct_dir, 'scripts')
 data_raw_dir = os.path.join(open_instruct_dir, 'data', 'raw_train')
 processed_dir = os.path.join(open_instruct_dir, 'data', 'processed')
@@ -33,8 +35,6 @@ data_inds_dir = os.path.join(scripts_dir, 'data_inds')
 lm_output_dir = os.path.join(scripts_dir, 'model_outputs')
 text_viz_path = os.path.join(scripts_dir, 'text_viz')
 curriculum_dir = os.path.join(scripts_dir, 'curriculum')
-
-
 
 def save_to_pickle(save_path, output):
     if 'inds' in output:
@@ -58,8 +58,7 @@ def get_dataset_size(data_dir = 'data/processed'):
     for path in paths:
         ds = load_dataset('json', 
                           data_files={'train': path}, 
-                          split='train', 
-                          cache_dir=os.path.dirname(path))
+                          split='train')
         basename = os.path.basename(path)
         if 'data' in basename:
             name = basename.split('_data')[0]
@@ -119,8 +118,7 @@ def get_dataset(dataset, processed=True):
     ds = load_dataset(
         'json', 
         data_files={'train': train_file}, 
-        split='train', 
-        cache_dir=os.path.dirname(train_file))
+        split='train')
     return ds
 
 

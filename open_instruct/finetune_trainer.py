@@ -506,18 +506,17 @@ def main():
         dataset_args = {}
         if data_args.train_file is not None:
             data_files["train"] = data_args.train_file
-        # if 'ultrachat' in data_args.train_file:
-        #     data_files['test'] = (
-        #         '/gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/open-instruct/'
-        #         'data/processed/ultrachat/ultrachat200k_test_data.jsonl')
+        test_file = re.sub('train', 'test', data_args.train_file)
+        if test_file != data_args.train_file and os.path.isfile(test_file):
+            data_files['test'] = test_file
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
             cache_dir=model_args.cache_dir if model_args.cache_dir else os.path.dirname(data_files['train']),
             **dataset_args,
         )
-        # if 'ultrachat' in data_args.train_file:
-        #     raw_datasets['test'] = raw_datasets['test'].select(range(1000))
+        if 'test' in data_files:
+            raw_datasets['test'] = raw_datasets['test'].select(range(1000))
 
 
     config_kwargs = {
@@ -555,7 +554,7 @@ def main():
         raise ValueError(
             "You are instantiating a new tokenizer from scratch. This is not supported by this finetuning script."
         )
-
+    
     if model_args.model_name_or_path:
         torch_dtype = (
             model_args.torch_dtype
