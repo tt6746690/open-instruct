@@ -40,6 +40,7 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
                 # tokenizer_mode="slow",
                 tensor_parallel_size=torch.cuda.device_count(),
+                dtype=getattr(torch, args.torch_dtype),
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
@@ -55,6 +56,7 @@ def main(args):
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
+                torch_dtype=getattr(torch, args.torch_dtype),
             )
             outputs = generate_completions( 
                 model=model,
@@ -148,6 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_vllm", action="store_true", help="If given, we will use vLLM to generate the predictions - much faster.")
     parser.add_argument("--annotators_config", type=str, default="alpaca_eval_gpt4_0314")
     parser.add_argument("--max_num_examples", type=int, default=8192, help="maximum number of examples to evaluate.")
+    parser.add_argument("--torch_dtype", type=str, default='float16', choices=['float16', 'bfloat16'])
 
     args = parser.parse_args()
 

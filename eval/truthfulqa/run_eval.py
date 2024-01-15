@@ -286,6 +286,7 @@ def main(args):
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
             use_fast_tokenizer=not args.use_slow_tokenizer,
+            torch_dtype=getattr(torch, args.torch_dtype),
         )
         if "judge" in args.metrics or "info" in args.metrics:
             print("Running generations!")
@@ -453,5 +454,7 @@ if __name__ == '__main__':
         type=str, 
         help='If `info` metric is used, the trained GPT info model name should be provided.'
     )
+    parser.add_argument("--torch_dtype", type=str, default='float16', choices=['float16', 'bfloat16'])
+
     args = parser.parse_args()
     main(args)

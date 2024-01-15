@@ -79,6 +79,7 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
+                dtype=getattr(torch, args.torch_dtype),
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
@@ -98,6 +99,7 @@ def main(args):
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
+                torch_dtype=getattr(torch, args.torch_dtype),
             )
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1]
             outputs = generate_completions(
@@ -184,6 +186,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_vllm", action="store_true", help="If given, we will use vLLM to generate the predictions - much faster.")
     parser.add_argument("--max_prompts_per_group", type=int, default=500, help="If given, we will only use this many prompts per group. Default to 500 (half the available prompts).")
     parser.add_argument("--max_new_tokens", type=int, default=512)
+    parser.add_argument("--torch_dtype", type=str, default='float16', choices=['float16', 'bfloat16'])
+
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.

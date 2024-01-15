@@ -84,7 +84,9 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
+                dtype=getattr(torch, args.torch_dtype),
             )
+            tokenizer = model.llm_engine.tokenizer
         else:
             print("Loading model and tokenizer with huggingface...")
             model, tokenizer = load_hf_lm_and_tokenizer(
@@ -94,6 +96,7 @@ def main(args):
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
+                torch_dtype=getattr(torch, args.torch_dtype),
             )
 
     # wpq: for gpt-2 model, need to enforce `max_length` constraints to avoid `position_id` index errors.
@@ -223,6 +226,7 @@ if __name__ == "__main__":
     parser.add_argument("--chat_formatting_function", type=str, default="eval.templates.create_prompt_with_tulu_chat_format", help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`.")
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--n_shot", type=int, default=3)
+    parser.add_argument("--torch_dtype", type=str, default='float16', choices=['float16', 'bfloat16'])
 
     args = parser.parse_args()
 
