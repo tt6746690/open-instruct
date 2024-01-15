@@ -940,6 +940,18 @@ def get_alpacafarm_generations(save_dirs, filter_fn_name=None, task='alpacafarm_
     return df
 
 
+
+def is_preference_dataset(dataset):
+    if any(x in dataset for x in [
+        'openai_sum',
+        'shp',
+        'hh_rlhf',
+        'ultrafeedback',
+    ]):
+        return True
+    else:
+        return False
+
     
 def get_encode_fn_type(md, dataset):
     """Get encode_fn_type given `md` and `dataset`.
@@ -948,7 +960,7 @@ def get_encode_fn_type(md, dataset):
     if md is not None and any(x in md for x in ['mpnet', 'bge']):
         return 'input'
     else:
-        if dataset is not None and dataset in ['ultrafeedback']:
+        if dataset is not None and is_preference_dataset(dataset):
             return 'pref'
         else:
             return 'sft'

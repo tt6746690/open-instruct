@@ -1,6 +1,7 @@
 *.pkl
 *.out
 
+cache/
 results
 models
 wandb
