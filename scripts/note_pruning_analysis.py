@@ -72,20 +72,39 @@ def get_dataset_size(data_dir = 'data/processed'):
     df['length'] = df['length'].apply(lambda x: '{:,.0f}'.format(x))
     return df
 
+
 dataset_with_multiple_version = [
+    'alpagasus',
+    'baize',
+    'code_alpaca',
+    'cot',
+    'dolly',
+    'flan_v2',
+    'flan2022',
+    'gpt4_alpaca',
+    'hh_rlhf',
+    'lima',
+    'oasst',
+    'open_orca',
+    'openai_sum',
+    'self_instruct',
+    'sharegpt',
+    'shp',
+    'stanford_alpaca',
+    'starcoder',
+    'super_ni',
     'tulu_v1',
     'tulu_v2',
     'tulu',
-    'flan2022', 
-    'starcoder',
-    'open_orca',
-    'sharegpt',
-    'wizardlm',
+    'ultrachat',
     'ultrafeedback',
+    'unnatural_instructions',
+    'wizardlm',
 ]
 
 dataset_with_train_val_split = [
     'ultrachat200k',
+    'ultrachat50k',
 ]
     
 def get_dataset(dataset, processed=True):

@@ -857,7 +857,7 @@ def compute_lm_outputs(
     if rank == 0:
         train_dataset = get_dataset(dataset, processed=True)
         print(f"{dataset} dataset length = {len(train_dataset)}")
-        if encode_fn_type != 'pref' and (x in train_dataset.column_names for x in ['chosen', 'rejected']):
+        if encode_fn_type != 'pref' and all(x in train_dataset.column_names for x in ['chosen', 'rejected']):
             train_dataset = train_dataset.rename_column('chosen', 'messages')
         train_dataset = train_dataset.map(
             encode_function, batched=False, num_proc=64,
@@ -867,7 +867,7 @@ def compute_lm_outputs(
     if rank!= 0:
         train_dataset = get_dataset(dataset, processed=True)
         print(f"{dataset} dataset length = {len(train_dataset)}")
-        if encode_fn_type != 'pref' and (x in train_dataset.column_names for x in ['chosen', 'rejected']):
+        if encode_fn_type != 'pref' and all(x in train_dataset.column_names for x in ['chosen', 'rejected']):
             train_dataset = train_dataset.rename_column('chosen', 'messages')
         train_dataset = train_dataset.map(
             encode_function, batched=False, num_proc=64,

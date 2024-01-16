@@ -114,27 +114,55 @@ def convert_cot_data(data_dir, output_dir, num_zero_shot_examples=50000, num_few
             }) + "\n")
             
 
-def convert_flan_v2_data(data_dir, output_dir, data_file="tulu_v1_resampled_flan_100k.jsonl"):
+def convert_flan_v2_data(data_dir, output_dir, data_file="tulu_v1_resampled_flan_100k.jsonl", num_examples=None, max_seq_length=None, dataset_name="flan_v2"):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_flan_v2_data
+        data_dir = 'data/raw_train/flan_v2'
+        output_dir = 'data/processed/flan_v2'
+        convert_flan_v2_data(data_dir, output_dir, dataset_name='flan_v2')
+        convert_flan_v2_data(data_dir, output_dir, num_examples=50_000, max_seq_length=2048, dataset_name='flan_v250k')
+        ```
+    """
     os.makedirs(output_dir, exist_ok=True)
+
+    target_filename = f"{dataset_name}_data.jsonl"
+
     examples = []
     with open(os.path.join(data_dir, data_file), "r") as fin:
         for line in fin:
             examples.append(json.loads(line))
-    output_path = os.path.join(output_dir, "flan_v2_data.jsonl")
+    if num_examples:
+        random.seed(0)
+        examples = random.sample(examples, k=int(num_examples*1.1))
+
+    def convert_example_to_messages(example, idx):
+        prompt = example["inputs"]
+        if not prompt.endswith("\n") and not prompt.rstrip().endswith(":"):
+            prompt += "\n"
+        completion = example["targets"]
+        return {
+            "dataset": "flan_v2",
+            "id": f"flan_v2_{idx}",
+            "messages": [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": completion},
+            ]
+        }
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
     with open(output_path, "w") as fout:
-        for idx, example in enumerate(examples):
-            prompt = example["inputs"]
-            if not prompt.endswith("\n") and not prompt.rstrip().endswith(":"):
-                prompt += "\n"
-            completion = example["targets"]
-            fout.write(json.dumps({
-                "dataset": "flan_v2",
-                "id": f"flan_v2_{idx}",
-                "messages": [
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": completion},
-                ]
-            }) + "\n")
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
+
 
 
 def convert_flan2022_data(data_dir, output_dir):
@@ -175,60 +203,106 @@ def convert_flan2022_data(data_dir, output_dir):
         ds.to_json(output_path)
 
 
-def convert_dolly_data(data_dir, output_dir, number_examples=None):
+def convert_dolly_data(data_dir, output_dir, num_examples=None, max_seq_length=None, dataset_name="dolly"):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_dolly_data
+        data_dir = 'data/raw_train/dolly'
+        output_dir = 'data/processed/dolly'
+        convert_dolly_data(data_dir, output_dir, dataset_name='dolly')
+        ```
+    """
     os.makedirs(output_dir, exist_ok=True)
+    target_filename = f"{dataset_name}_data.jsonl"
+
     examples = []
     with open(os.path.join(data_dir, "databricks-dolly-15k.jsonl"), "r") as fin:
         for line in fin:
             examples.append(json.loads(line))
-    if number_examples:
-        examples = random.sample(examples, k=number_examples)
-    output_path = os.path.join(output_dir, "dolly_data.jsonl")
+    if num_examples:
+        random.seed(0)
+        examples = random.sample(examples, k=int(num_examples*1.1))
+    def convert_example_to_messages(example, idx):
+        encoded_example = encode_instruction_example(
+            instruction=example["instruction"], 
+            input=example["context"], 
+            output=example["response"],
+            random_template=True,
+            eos_token=None
+        )
+        return {
+            "dataset": "dolly",
+            "id": f"dolly_{idx}",
+            "messages": [
+                {"role": "user", "content": encoded_example["prompt"]},
+                {"role": "assistant", "content": encoded_example["completion"]},
+            ]
+        }
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
     with open(output_path, "w") as fout:
-        for idx, example in enumerate(examples):
-            encoded_example = encode_instruction_example(
-                instruction=example["instruction"], 
-                input=example["context"], 
-                output=example["response"],
-                random_template=True,
-                eos_token=None
-            )
-            fout.write(json.dumps({
-                "dataset": "dolly",
-                "id": f"dolly_{idx}",
-                "messages": [
-                    {"role": "user", "content": encoded_example["prompt"]},
-                    {"role": "assistant", "content": encoded_example["completion"]},
-                ]
-            }) + "\n")
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
 
 
-def convert_self_instruct_data(data_dir, output_dir, number_examples=None):
+def convert_self_instruct_data(data_dir, output_dir, num_examples=None, max_seq_length=None, dataset_name="self_instruct"):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_self_instruct_data
+        data_dir = 'data/raw_train/self_instruct'
+        output_dir = 'data/processed/self_instruct'
+        # convert_self_instruct_data(data_dir, output_dir, dataset_name='self_instruct')
+        convert_self_instruct_data(data_dir, output_dir, num_examples=50_000, max_seq_length=2048, dataset_name='self_instruct50k')
+        ```
+    """
     os.makedirs(output_dir, exist_ok=True)
+    target_filename = f"{dataset_name}_data.jsonl"
+
     examples = []
     with open(os.path.join(data_dir, "all_instances_82K.jsonl"), "r") as fin:
         for line in fin:
             examples.append(json.loads(line))
-    if number_examples:
-        examples = random.sample(examples, k=number_examples)
-    output_path = os.path.join(output_dir, "self_instruct_data.jsonl")
+    if num_examples:
+        random.seed(0)
+        examples = random.sample(examples, k=int(num_examples*1.1))
+
+    def convert_example_to_messages(example, idx):
+        encoded_example = encode_instruction_example(
+            instruction=example["instruction"], 
+            input=example["input"], 
+            output=example["output"],
+            random_template=True,
+            eos_token=None
+        )
+        return {
+            "dataset": "self_instruct",
+            "id": f"self_instruct_{idx}",
+            "messages": [
+                {"role": "user", "content": encoded_example["prompt"]},
+                {"role": "assistant", "content": encoded_example["completion"]},
+            ]
+        }
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
     with open(output_path, "w") as fout:
-        for idx, example in enumerate(examples):
-            encoded_example = encode_instruction_example(
-                instruction=example["instruction"], 
-                input=example["input"], 
-                output=example["output"],
-                random_template=True,
-                eos_token=None
-            )
-            fout.write(json.dumps({
-                "dataset": "self_instruct",
-                "id": f"self_instruct_{idx}",
-                "messages": [
-                    {"role": "user", "content": encoded_example["prompt"]},
-                    {"role": "assistant", "content": encoded_example["completion"]},
-                ]
-            }) + "\n")
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
 
 
 def convert_unnatural_instructions_data(data_dir, output_dir, num_examples=None):
@@ -265,31 +339,55 @@ def convert_unnatural_instructions_data(data_dir, output_dir, num_examples=None)
             }) + "\n")
 
 
-def convert_stanford_alpaca_data(data_dir, output_dir, num_examples=None):
+def convert_stanford_alpaca_data(data_dir, output_dir, num_examples=None, max_seq_length=None, dataset_name="stanford_alpaca"):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_stanford_alpaca_data
+        data_dir = 'data/raw_train/stanford_alpaca'
+        output_dir = 'data/processed/stanford_alpaca'
+        # convert_stanford_alpaca_data(data_dir, output_dir, dataset_name='stanford_alpaca')
+        convert_stanford_alpaca_data(data_dir, output_dir, num_examples=50_000, max_seq_length=2048, dataset_name='stanford_alpaca50k')
+        ```
+    """
     os.makedirs(output_dir, exist_ok=True)
+    target_filename = f"{dataset_name}_data.jsonl"
+
     examples = []
     with open(os.path.join(data_dir, "alpaca_data.json"), "r") as fin:
         examples.extend(json.load(fin))
     if num_examples:
-        examples = random.sample(examples, k=num_examples)
-    output_path = os.path.join(output_dir, "stanford_alpaca_data.jsonl")
+        random.seed(0)
+        examples = random.sample(examples, k=min(num_examples*1.1, len(examples)))
+    
+    def convert_example_to_messages(example, idx):
+        encoded_example = encode_instruction_example(
+            instruction=example["instruction"], 
+            input=example["input"], 
+            output=example["output"],
+            random_template=True,
+            eos_token=None
+        )
+        return {
+            "dataset": "stanford_alpaca",
+            "id": f"stanford_alpaca_{idx}",
+            "messages": [
+                {"role": "user", "content": encoded_example["prompt"]},
+                {"role": "assistant", "content": encoded_example["completion"]},
+            ]
+        }
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+    
+    output_path = os.path.join(output_dir, target_filename)
     with open(output_path, "w") as fout:
-        for idx, example in enumerate(examples):
-            encoded_example = encode_instruction_example(
-                instruction=example["instruction"], 
-                input=example["input"], 
-                output=example["output"],
-                random_template=True,
-                eos_token=None
-            )
-            fout.write(json.dumps({
-                "dataset": "stanford_alpaca",
-                "id": f"stanford_alpaca_{idx}",
-                "messages": [
-                    {"role": "user", "content": encoded_example["prompt"]},
-                    {"role": "assistant", "content": encoded_example["completion"]},
-                ]
-            }) + "\n")
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
 
 
 def convert_code_alpaca_data(data_dir, output_dir, num_examples=None):
@@ -319,8 +417,19 @@ def convert_code_alpaca_data(data_dir, output_dir, num_examples=None):
             }) + "\n")
 
 
-def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False, num_examples=None):
+def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False, num_examples=None, dataset_name="gpt4_alpaca", max_seq_length=None):
+    """
+        ```
+        from open_instruct.reformat_datasets import convert_gpt4_alpaca_data
+        data_dir = 'data/raw_train/gpt4_alpaca'
+        output_dir = 'data/processed/gpt4_alpaca'
+        # convert_gpt4_alpaca_data(data_dir, output_dir, dataset_name='gpt4_alpaca')
+        convert_gpt4_alpaca_data(data_dir, output_dir, num_examples=50_000, max_seq_length=2048, dataset_name='gpt4_alpaca50k')
+        ```
+    """
     os.makedirs(output_dir, exist_ok=True)
+    target_filename = f"{dataset_name}_data.jsonl"
+
     examples = []
     if load_en:
         with open(os.path.join(data_dir, "alpaca_gpt4_data.json"), "r") as fin:
@@ -329,25 +438,37 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False, 
         with open(os.path.join(data_dir, "alpaca_gpt4_data_zh.json"), "r") as fin:
             examples.extend(json.load(fin))
     if num_examples:
-        examples = random.sample(examples, k=num_examples)
-    output_path = os.path.join(output_dir, "gpt4_alpaca_data.jsonl")
+        random.seed(0)
+        examples = random.sample(examples, k=int(min(num_examples*1.1, len(examples))))
+    def convert_example_to_messages(example, idx):
+        encoded_example = encode_instruction_example(
+            instruction=example["instruction"], 
+            input=example["input"], 
+            output=example["output"],
+            random_template=True,
+            eos_token=None
+        )
+        return {
+            "dataset": "gpt4_alpaca",
+            "id": f"gpt4_alpaca_{idx}",
+            "messages": [
+                {"role": "user", "content": encoded_example["prompt"]},
+                {"role": "assistant", "content": encoded_example["completion"]},
+            ]
+        }
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
     with open(output_path, "w") as fout:
-        for idx, example in enumerate(examples):
-            encoded_example = encode_instruction_example(
-                instruction=example["instruction"], 
-                input=example["input"], 
-                output=example["output"],
-                random_template=True,
-                eos_token=None
-            )
-            fout.write(json.dumps({
-                "dataset": "gpt4_alpaca",
-                "id": f"gpt4_alpaca_{idx}",
-                "messages": [
-                    {"role": "user", "content": encoded_example["prompt"]},
-                    {"role": "assistant", "content": encoded_example["completion"]},
-                ]
-            }) + "\n")
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
 
 
 def clean_starcoder_data(data_dir, filename, num_proc=16):
@@ -509,7 +630,7 @@ def convert_starcoder_data(data_dir, output_dir):
         filter_json_by_numtoks(output_path, tokenizer_name='codellama', max_seq_length=2048)
 
 
-def convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048.json", num_examples=None, dataset_name="sharegpt"):
+def convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048.json", num_examples=None, max_seq_length=None, dataset_name="sharegpt"):
     """
         python scripts/split_sharegpt_conversations.py \
             --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
@@ -527,51 +648,70 @@ def convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned
         data_dir = 'data/raw_train/sharegpt'
         output_dir = 'data/processed/sharegpt'
         convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048_discardlongconv.json", dataset_name="sharegptv2")
+        convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048_discardlongconv.json", num_examples=50_000, max_seq_length=2048, dataset_name="sharegpt50k")
         ```
- 
     """
     os.makedirs(output_dir, exist_ok=True)
+    target_filename = f'{dataset_name}_data.jsonl'
+
     examples = []
     with open(os.path.join(data_dir, data_file), "r") as fin:
         examples.extend(json.load(fin))
     if num_examples:
-        examples = random.sample(examples, k=num_examples)
-
-    output_path = os.path.join(output_dir, f"{dataset_name}_data.jsonl")
-    with open(output_path, "w") as fout:
-        invalid_cnt = 0
-        for idx, example in enumerate(examples):
-            messages = []
-            valid = True
-            for message in example["conversations"]:
-                if message["from"] == "human" or message["from"] == "user":
-                    messages.append({
-                        "role": "user",
-                        "content": message["value"]
-                    })
-                elif message["from"] == "gpt" or message["from"] == "chatgpt":
-                    messages.append({
-                        "role": "assistant",
-                        "content": message["value"]
-                    })
-                elif message["from"] == "system":
-                    valid = False
-                    invalid_cnt += 1
-                    break
-                elif message["from"] == "bing":
-                    valid = False
-                    invalid_cnt += 1
-                    break
-                else:
-                    raise ValueError(f"Unknown message sender: {message['from']}")
-            if messages and valid:
-                fout.write(json.dumps({
+        random.seed(0)
+        examples = random.sample(examples, k=int(num_examples*1.1))
+    
+    invalid_cnt = 0
+    def convert_example_to_messages(example, idx):
+        messages = []
+        valid = True
+        for message in example["conversations"]:
+            if message["from"] == "human" or message["from"] == "user":
+                messages.append({
+                    "role": "user",
+                    "content": message["value"]
+                })
+            elif message["from"] == "gpt" or message["from"] == "chatgpt":
+                messages.append({
+                    "role": "assistant",
+                    "content": message["value"]
+                })
+            elif message["from"] == "system":
+                valid = False
+                invalid_cnt += 1
+                break
+            elif message["from"] == "bing":
+                valid = False
+                invalid_cnt += 1
+                break
+            else:
+                raise ValueError(f"Unknown message sender: {message['from']}")
+        if messages and valid:
+            return {
                     "dataset": "sharegpt",
                     "id": f"sharegpt_{example['id']}",
                     "messages": messages
-                }) + "\n")
-        if invalid_cnt > 0:
-            print(f"# of invalid examples in sharegpt data: {invalid_cnt}")
+                }
+        else:
+            return None
+    
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    examples = [x for x in examples if x is not None]
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
+    with open(output_path, "w") as fout:
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
+
+    if invalid_cnt > 0:
+        print(f"# of invalid examples in sharegpt data: {invalid_cnt}")
 
 
 def convert_baize_data(data_dir, output_dir, num_examples=None):
@@ -581,6 +721,7 @@ def convert_baize_data(data_dir, output_dir, num_examples=None):
         with open(os.path.join(data_dir, f"{source}_chat_data.json"), "r") as fin:
             examples.extend(json.load(fin))
     if num_examples:
+        random.seed(0)
         examples = random.sample(examples, k=num_examples)
     output_path = os.path.join(output_dir, "baize_data.jsonl")
     with open(output_path, "w") as fout:
@@ -607,24 +748,41 @@ def convert_baize_data(data_dir, output_dir, num_examples=None):
             }) + "\n")
 
 
-def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
+def convert_oasst_data(data_dir, output_dir, top_k_reply=None, num_examples=None, max_seq_length=None, source_filename="2023-04-12_oasst_ready.trees.jsonl", dataset_name="oasst1"):
     '''
     For OASST1, because it's in a tree structure, where every user input might get multiple replies, 
     we have to save every path from the root node to the assistant reply (including both leaf node and intemediate node).
     This results in some of the messages being duplicated among different paths (instances).
     You can set top_k_reply to control how many replies to consider when traversing the tree, which will consider the replies with 
     the highest human-reviewed quality scores.
+
+    Average/Max/Min number of child replies: 1.4414046396582094, 16, 0
+    top_k_reply=1    -> 7k examples
+    top_k_reply=None -> 33k examples
+
+    ```
+    from open_instruct.reformat_datasets import convert_oasst_data
+    data_dir = 'data/raw_train/oasst1'
+    output_dir = 'data/processed/oasst1'
+    convert_oasst_data(data_dir, output_dir, top_k_reply=None, max_seq_length=2048, source_filename="2023-04-12_oasst_ready.trees.jsonl", dataset_name='oasst1')
+    convert_oasst_data(data_dir, output_dir, top_k_reply=None, max_seq_length=2048, source_filename="2023-11-05_oasst2_ready.trees.jsonl", dataset_name='oasst2')
+    ```
     '''
     os.makedirs(output_dir, exist_ok=True)
+    target_filename = f"{dataset_name}_data.jsonl"
+
     conversations = []
-    with open(os.path.join(data_dir, "2023-04-12_oasst_ready.trees.jsonl"), "r") as fin:
+    with open(os.path.join(data_dir, source_filename), "r") as fin:
         for line in fin:
             conversations.append(json.loads(line))
 
-    output_path = os.path.join(output_dir, "oasst1_data.jsonl")
+    output_path = os.path.join(output_dir, target_filename)
+
+    child_replies_len = []
 
     # tranvers the conversation tree, and collect all valid sequences
     def dfs(reply, messages, valid_sequences):
+        nonlocal child_replies_len
         if reply["deleted"]:
             return
         if reply["role"] == "assistant":
@@ -641,6 +799,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
                             "value": 0.0,
                             "count": 0,
                         }
+                child_replies_len += [len(child_replies)]
                 child_replies = child_replies if top_k_reply is None else sorted(child_replies, key=lambda x: x["labels"]["quality"]["value"], reverse=True)[:top_k_reply]
                 for child in child_replies:
                     dfs(child, messages, valid_sequences)
@@ -656,6 +815,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
                         "value": 0.0,
                         "count": 0,
                     }
+            child_replies_len += [len(child_replies)]
             child_replies = child_replies if top_k_reply is None else sorted(child_replies, key=lambda x: x["labels"]["quality"]["value"], reverse=True)[:top_k_reply]
             for child in child_replies:
                 dfs(child, messages, valid_sequences)
@@ -663,18 +823,34 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
         else:
             raise ValueError(f"Unknown role: {reply['role']}")
         
+    example_cnt = 0
+    examples = []
+    for conversation in conversations:
+        valid_sequences = []
+        dfs(conversation["prompt"], [], valid_sequences)
+        for sequence in valid_sequences:
+            examples.append({
+                "dataset": dataset_name,
+                "id": f"{dataset_name}_{example_cnt}",
+                "messages": sequence
+            })
+            example_cnt += 1
+
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+    if num_examples:
+        random.seed(0)
+        examples = random.sample(examples, k=num_examples)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+        
     with open(output_path, "w") as fout:
-        example_cnt = 0
-        for _, conversation in enumerate(conversations):
-            valid_sequences = []
-            dfs(conversation["prompt"], [], valid_sequences)
-            for sequence in valid_sequences:
-                fout.write(json.dumps({
-                    "dataset": "oasst1",
-                    "id": f"oasst1_{example_cnt}",
-                    "messages": sequence
-                }) + "\n")
-                example_cnt += 1
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
+
 
 
 def convert_lima_data(data_dir, output_dir, num_examples=None):
@@ -709,7 +885,8 @@ def convert_lima_data(data_dir, output_dir, num_examples=None):
             }) + "\n")
 
 
-def convert_wizardlm_data(data_dir, output_dir, num_examples=30000, version='wizardlm'):
+
+def convert_wizardlm_data(data_dir, output_dir, num_examples=30000, max_seq_length=None, dataset_name='wizardlm'):
     """
         ```
         from note_pruning_analysis import filter_json_by_numtoks
@@ -726,49 +903,57 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000, version='wiz
         wizardlmv2: truncate to 2048 max tokens.
     """
     os.makedirs(output_dir, exist_ok=True)
+    target_filename = f"{dataset_name}_data.jsonl"
 
     examples = []
     with open(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json"), "r") as fin:
         examples = json.load(fin)
     if num_examples:
-        examples = random.sample(examples, k=num_examples)
+        random.seed(0)
+        examples = random.sample(examples, k=int(num_examples*1.1))
 
-    if version == 'wizardlm':
-        output_path = os.path.join(output_dir, "wizardlm_data.jsonl")
-    elif version == 'wizardlmv2':
-        output_path = os.path.join(output_dir, "wizardlmv2_data.jsonl")
-    else:
-        raise ValueError(f"Unknown version: {version}")
+    def convert_example_to_messages(example, idx):
+        messages = []
+        assert len(example["conversations"]) % 2 == 0
+        for i in range(0, len(example["conversations"]), 2):
+            assert example["conversations"][i]["from"] == "human"
+            assert example["conversations"][i+1]["from"] == "gpt"
+            messages.append({
+                "role": "user",
+                "content": example["conversations"][i]["value"]
+            })
+            messages.append({
+                "role": "assistant",
+                "content": example["conversations"][i+1]["value"]
+            })
+        return {
+            "dataset": "wizardlm",
+            "id": f"wizardlm_{example['idx']}",
+            "messages": messages,
+        }
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
     with open(output_path, "w") as fout:
-        for idx, example in enumerate(examples):
-            messages = []
-            assert len(example["conversations"]) % 2 == 0
-            for i in range(0, len(example["conversations"]), 2):
-                assert example["conversations"][i]["from"] == "human"
-                assert example["conversations"][i+1]["from"] == "gpt"
-                messages.append({
-                    "role": "user",
-                    "content": example["conversations"][i]["value"]
-                })
-                messages.append({
-                    "role": "assistant",
-                    "content": example["conversations"][i+1]["value"]
-                })
-            fout.write(json.dumps({
-                "dataset": "wizardlm",
-                "id": f"wizardlm_{example['idx']}",
-                "messages": messages,
-            }) + "\n")
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
 
 
 
-def convert_shp_data(data_dir, output_dir, num_examples=None):
+def convert_shp_data(data_dir, output_dir, num_examples=None, max_seq_length=None):
     """
         ```
         from open_instruct.reformat_datasets import convert_shp_data
         data_dir = 'data/raw_train/shp'
         output_dir = 'data/processed/shp'
-        convert_shp_data(data_dir, output_dir, num_examples=50_000)
+        convert_shp_data(data_dir, output_dir, num_examples=50_000, max_seq_length=2048)
         ```
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -805,7 +990,8 @@ def convert_shp_data(data_dir, output_dir, num_examples=None):
             ],
         }
     examples = [convert_example_to_messages(x) for x in examples]
-    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
     if num_examples is not None:
         if len(examples) >= num_examples:
             examples = examples[:num_examples]
@@ -819,7 +1005,7 @@ def convert_shp_data(data_dir, output_dir, num_examples=None):
 
 
 
-def convert_hh_rlhf_data(data_dir, output_dir, num_examples=None):
+def convert_hh_rlhf_data(data_dir, output_dir, num_examples=None, max_seq_length=None):
     """
         ```
         from open_instruct.reformat_datasets import convert_hh_rlhf_data
@@ -854,7 +1040,8 @@ def convert_hh_rlhf_data(data_dir, output_dir, num_examples=None):
         }
         return example
     examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
-    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
     if num_examples is not None:
         if len(examples) >= num_examples:
             examples = examples[:num_examples]
@@ -881,7 +1068,7 @@ def get_unique_ids_subset(L):
 
 
 
-def convert_openai_sum_data(data_dir, output_dir, num_examples=None):
+def convert_openai_sum_data(data_dir, output_dir, num_examples=None, max_seq_length=None):
     """
         ```
         from open_instruct.reformat_datasets import convert_openai_sum_data
@@ -918,7 +1105,8 @@ def convert_openai_sum_data(data_dir, output_dir, num_examples=None):
             ]
         }
     examples = [convert_example_to_messages(x) for x in examples]
-    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
     if num_examples is not None:
         if len(examples) >= num_examples:
             examples = examples[:num_examples]
@@ -932,7 +1120,7 @@ def convert_openai_sum_data(data_dir, output_dir, num_examples=None):
     
 
 
-def convert_ultrafeedback_data(data_dir, output_dir, num_examples=None):
+def convert_ultrafeedback_data(data_dir, output_dir, num_examples=None, max_seq_length=None):
     """Currently use cleaned version from allenai
             ultrafeedback: allenai/ultrafeedback_binarized_cleaned
 
@@ -964,7 +1152,8 @@ def convert_ultrafeedback_data(data_dir, output_dir, num_examples=None):
             'source': example['source'],
         }
     examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
-    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if max_seq_length is not None:
+        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
     if num_examples is not None:
         if len(examples) >= num_examples:
             examples = examples[:num_examples]
@@ -1058,7 +1247,7 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
 
 
 
-def convert_ultrachat_data(data_dir, output_dir, version='ultrachat200k'):
+def convert_ultrachat_data(data_dir, output_dir, num_examples=None, max_seq_length=None, dataset_name='ultrachat200k'):
     """
 
         ultrachat200k: originnal dataset split long conv, without discarding long conv examples properly.
@@ -1082,23 +1271,29 @@ def convert_ultrachat_data(data_dir, output_dir, version='ultrachat200k'):
         from open_instruct.reformat_datasets import convert_ultrachat_data
         data_dir = 'data/raw_train/ultrachat'
         output_dir = 'data/processed/ultrachat'
-        dataset = 'ultrachat200kv2'
-        convert_ultrachat_data(data_dir, output_dir, version=dataset)
-        print(f"Filtering {dataset} to max_seq_length=2048...")
-        filepath = os.path.join(output_dir, f"{dataset}_data.jsonl")
-        filter_json_by_numtoks(filepath, max_seq_length=2048)
+        convert_ultrachat_data(data_dir, output_dir, max_seq_length=2048, dataset_name='ultrachat200kv2')
+        convert_ultrachat_data(data_dir, output_dir, num_examples=50_000, max_seq_length=2048, dataset_name='ultrachat50k')
         ```
     
     """
     from datasets import load_dataset, concatenate_datasets
 
-    if version == 'ultrachat200k':
-        # ds = load_dataset('HuggingFaceH4/ultrachat_200k', cache_dir=data_dir, split='train_sft')
-        data_files = {'train': os.path.join(data_dir, 'ultrachat_200k_train_splitlongconv.json'),
-                      'test': os.path.join(data_dir, 'ultrachat_200k_test_splitlongconv.json')}
-        
+    os.makedirs(output_dir, exist_ok=True)
+
+    if not dataset_name.startswith('ultrachat15'): # subsample from 200k data
+        if num_examples is None:
+            if dataset_name.startswith('ultrachat200k'):
+                data_files = {'train': os.path.join(data_dir, 'ultrachat_200k_train_splitlongconv.json'),
+                              'test': os.path.join(data_dir, 'ultrachat_200k_test_splitlongconv.json')}
+            else:
+                data_files = {'train': os.path.join(data_dir, 'ultrachat200k_train_2048_discardlongconv.json'),
+                              'test': os.path.join(data_dir, 'ultrachat200k_test_2048_discardlongconv.json')}
+        else:
+            data_files = {'train': os.path.join(data_dir, 'ultrachat200k_train_2048_discardlongconv.json'),
+                          'test': os.path.join(data_dir, 'ultrachat200k_test_2048_discardlongconv.json')}
+            
         for split in ['train', 'test']:
-            ds = load_dataset('json', data_files=data_files, split=split, cache_dir=data_dir)
+            ds = load_dataset('json', data_files=data_files, split=split)
             # splitting conversations removes "prompt" already.
             ds = ds.remove_columns(["prompt_id"])
             def add_metadata_fn(example, idx):
@@ -1109,32 +1304,31 @@ def convert_ultrachat_data(data_dir, output_dir, version='ultrachat200k'):
                         num_proc=10)
             # re-ordering the features
             ds =  ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
-            
-            output_path = os.path.join(output_dir, f'ultrachat200k_{split}_data.jsonl')
-            ds.to_json(output_path)
-    elif version == 'ultrachat200kv2':
-        data_files = {'train': os.path.join(data_dir, 'ultrachat200k_train_2048_discardlongconv.json'),
-                      'test': os.path.join(data_dir, 'ultrachat200k_test_2048_discardlongconv.json')}
-        
-        for split in ['train', 'test']:
-            ds = load_dataset('json', data_files=data_files, split=split, cache_dir=data_dir)
-            # splitting conversations removes "prompt" already.
-            ds = ds.remove_columns(["prompt_id"])
-            def add_metadata_fn(example, idx):
-                example.update({'dataset': 'ultrachat', 'id': f'ultrachat_{idx}'})
-                return example
-            ds = ds.map(add_metadata_fn, 
-                        with_indices=True, 
-                        num_proc=10)
-            # re-ordering the features
-            ds =  ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
-            
-            output_path = os.path.join(output_dir, f'ultrachat200kv2_{split}_data.jsonl')
-            ds.to_json(output_path)
-    elif version == 'ultrachat15':
+
+            examples = [ds[i] for i in range(len(ds))]
+
+            if split == 'train':
+                if num_examples:
+                    random.seed(0)
+                    examples = random.sample(examples, k=int(num_examples*1.1))
+
+                if max_seq_length is not None:
+                        examples = filter_examples_by_numtoks(examples, max_seq_length=max_seq_length)
+                if num_examples is not None:
+                    if len(examples) >= num_examples:
+                        examples = examples[:num_examples]
+                    else:
+                        raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+            output_path = os.path.join(output_dir, f'{dataset_name}_{split}_data.jsonl')
+            with open(output_path, 'w') as fout:
+                for idx, example in enumerate(examples):
+                    fout.write(json.dumps(example) + "\n")
+
+    else: # ultrachat15
         data_files = {f'train_{i}': os.path.join(data_dir, 'full_splitlongconv_2048', f'train_{i}.jsonl') 
                       for i in range(10)}
-        ds = load_dataset('json', data_files=data_files, cache_dir=os.path.join(data_dir, 'full_splitlongconv_2048'))
+        ds = load_dataset('json', data_files=data_files)
         ds = concatenate_datasets([ds[f'train_{i}'] for i in range(10)])
         def add_metadata_fn(example, idx):
             example.update({'dataset': 'ultrachat', 'id': f'ultrachat_{idx}'})
@@ -1143,7 +1337,7 @@ def convert_ultrachat_data(data_dir, output_dir, version='ultrachat200k'):
         # too memory/compute intense.
         # ds = ds.select_columns(['dataset', 'id']).add_column('messages', ds['messages'])
 
-        save_path = os.path.join(output_dir, f'ultrachat15_data.jsonl')
+        save_path = os.path.join(output_dir, f'{dataset_name}_data.jsonl')
         ds.to_json(save_path)
 
         num_shards = 10
@@ -1226,6 +1420,54 @@ def should_be_filtered(example):
 
 
 
+def generate_50k_sft_datasets():
+    """Generate 50k subsample of sft dataset
+        ```
+        from open_instruct.reformat_datasets import *
+        from note_pruning_analysis import get_dataset
+        import glob
+        L = glob.glob('data/processed/*/*50k_*data.jsonl')
+        L += [
+            'data/processed/lima/lima_data.jsonl',
+            'data/processed/dolly/dolly_data.jsonl',
+            'data/processed/oasst/oasst2_data.jsonl',
+        ]
+        for p in sorted(L):
+            ds = get_dataset(p)
+            print(p, len(ds))
+        ```
+    """
+    datasets = [
+        'flan_v2',
+        'gpt4_alpaca',
+        'oasst2',
+        'self_instruct',
+        'sharegpt',
+        'stanford_alpaca',
+        'wizardlm',
+        'ultrachat',
+    ]
+
+    for dataset in datasets:
+        print(dataset)
+
+        extra_kwargs = {}
+        if dataset == 'sharegpt':
+            extra_kwargs['data_file'] = "sharegpt_html_cleaned_and_split_2048_discardlongconv.json"
+        if dataset.startswith('oasst2'):
+            extra_kwargs['dataset_name'] = f'oasst2'
+        else:
+            extra_kwargs['dataset_name'] = f'{dataset}50k'
+
+        globals()[f'convert_{dataset}_data'](
+            data_dir=f'data/raw_train/{dataset}',
+            output_dir=f'data/processed/{dataset}',
+            num_examples=50_000,
+            max_seq_length=2048,
+            **extra_kwargs)
+
+
+
 if __name__ == "__main__":
     # all supported datasets    
     supported_datasets = []
@@ -1278,9 +1520,9 @@ if __name__ == "__main__":
                 num_few_shot_examples=50000,
                 num_zero_shot_examples=50000
             )
-            convert_oasst1_data(
-                data_dir=os.path.join(args.raw_data_dir, "oasst1"), 
-                output_dir=os.path.join(args.output_dir, "tulu_v1", "oasst1_subset"), 
+            convert_oasst_data(
+                data_dir=os.path.join(args.raw_data_dir, "oasst"), 
+                output_dir=os.path.join(args.output_dir, "tulu_v1", "oasst_subset"), 
                 top_k_reply=None
             )
             convert_dolly_data(
@@ -1327,9 +1569,9 @@ if __name__ == "__main__":
                 num_few_shot_examples=25000,
                 num_zero_shot_examples=25000,
             )
-            convert_oasst1_data(
-                data_dir=os.path.join(args.raw_data_dir, "oasst1"), 
-                output_dir=os.path.join(args.output_dir, "tulu_v2", "oasst1_subset"), 
+            convert_oasst_data(
+                data_dir=os.path.join(args.raw_data_dir, "oasst"), 
+                output_dir=os.path.join(args.output_dir, "tulu_v2", "oasst_subset"), 
                 top_k_reply=1
             )
             convert_lima_data(
@@ -1411,6 +1653,3 @@ if __name__ == "__main__":
             else:
                 print(f"Warning: {filepath} does not exist. Skipping...")
             
-            """
-            python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/ --dataset oasst1
-            """

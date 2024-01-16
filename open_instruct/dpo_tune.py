@@ -254,6 +254,12 @@ def parse_args(cmd=None):
         choices=['RandomSampler', 'SequentialSampler'],
         default='RandomSampler',
     )
+    parser.add_argument(
+        '--overwrite_cache',
+        action='store_true',
+        default=False,
+        help='Overwrite the cached training and evaluation sets',
+    )
 
     if cmd is not None:
         from rosemary import jpt_parse_args
@@ -505,6 +511,7 @@ def main():
         raw_datasets = load_dataset(
             args.dataset_name,
             args.dataset_config_name,
+            download_mode=datasets.GenerateMode.FORCE_REDOWNLOAD if args.overwrite_cache else datasets.GenerateMode.REUSE_DATASET_IF_EXISTS,
         )
     else:
         data_files = {}
@@ -514,6 +521,7 @@ def main():
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
+            download_mode=datasets.GenerateMode.FORCE_REDOWNLOAD if args.overwrite_cache else datasets.GenerateMode.REUSE_DATASET_IF_EXISTS,
             **dataset_args,
         )
 
@@ -666,6 +674,7 @@ def main():
             batched=False,
             num_proc=args.preprocessing_num_workers,
             remove_columns=[name for name in raw_datasets["train_prefs"].column_names if name not in ["chosen_input_ids", "chosen_labels", "chosen_attention_mask", "rejected_input_ids", "rejected_labels", "rejected_attention_mask"]],
+            load_from_cache_file=not args.overwrite_cache,
             desc="Tokenizing and reformatting instruction data",
         )
         lm_datasets.set_format(type="pt")
@@ -785,7 +794,7 @@ def main():
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
-
+ 
     
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")

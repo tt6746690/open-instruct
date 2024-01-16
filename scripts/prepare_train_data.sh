@@ -40,9 +40,13 @@ echo "Downloading the dolly dataset..."
 wget -P data/raw_train/dolly/ https://huggingface.co/datasets/databricks/databricks-dolly-15k/resolve/main/databricks-dolly-15k.jsonl
 
 
-echo "Downloading the OpenAssistant data (oasst1)..."
-wget -P data/raw_train/oasst1/ https://huggingface.co/datasets/OpenAssistant/oasst1/resolve/main/2023-04-12_oasst_ready.trees.jsonl.gz
-gzip -d data/raw_train/oasst1/2023-04-12_oasst_ready.trees.jsonl.gz
+echo "Downloading the OpenAssistant data ..."
+wget -P data/raw_train/oasst/ https://huggingface.co/datasets/OpenAssistant/oasst1/resolve/main/2023-04-12_oasst_ready.trees.jsonl.gz
+gzip -d data/raw_train/oasst/2023-04-12_oasst_ready.trees.jsonl.gz
+
+wget -P data/raw_train/oasst/ https://huggingface.co/datasets/OpenAssistant/oasst2/resolve/main/2023-11-05_oasst2_ready.trees.jsonl.gz
+gzip -d data/raw_train/oasst/2023-11-05_oasst2_ready.trees.jsonl.gz
+
 
 
 echo "Downloading the code alpaca dataset..."
