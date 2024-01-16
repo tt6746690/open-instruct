@@ -180,27 +180,23 @@ wget -P data/raw_train/shp/ https://huggingface.co/datasets/stanfordnlp/SHP/reso
 
 echo "Downloading alpagasus dataset..."
 mkdir -p data/raw_train/alpagasus/
-wget -P data/raw_train/alpagasus/ https://github.com/gpt4life/alpagasus/blob/main/data/filtered/chatgpt_9k.json
+wget -P data/raw_train/alpagasus/ https://raw.githubusercontent.com/gpt4life/alpagasus/main/data/filtered/chatgpt_9k.json
 
 echo "Downloading HelpSteer dataset..."
 mkdir -p data/raw_train/HelpSteer/
-wget -P data/raw_train/HelpSteer/
-https://huggingface.co/datasets/nvidia/HelpSteer/blob/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/HelpSteer/HelpSteer_train.parquet
+wget -P data/raw_train/HelpSteer/ https://huggingface.co/datasets/nvidia/HelpSteer/blob/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/HelpSteer/HelpSteer_train.parquet
 wget -p data/raw_train/HelpSteer/ https://huggingface.co/datasets/nvidia/HelpSteer/blob/refs%2Fconvert%2Fparquet/default/validation/0000.parquet?download=true -O data/raw_train/HelpSteer/HelpSteer_val.parquet
 
 echo "Downloading orca_dpo_pairs dataset..."
 mkdir -p data/raw_train/orca_dpo_pairs/
-wget -P data/raw_train/orca_dpo_pairs/
-https://huggingface.co/datasets/Intel/orca_dpo_pairs/blob/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/orca_dpo_pairs/orca_dpo_pairs_train.parquet
+wget -P data/raw_train/orca_dpo_pairs/ https://huggingface.co/datasets/Intel/orca_dpo_pairs/blob/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/orca_dpo_pairs/orca_dpo_pairs_train.parquet
 
 echo "Downloading DEITA6k/10k dataset..."
 mkdir -p data/raw_train/DEITA6k/
-wget -P data/raw_train/DEITA6k/
-https://huggingface.co/datasets/hkust-nlp/deita-6k-v0/blob/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/DEITA6k/DEITA6k_train.parquet
+wget -P data/raw_train/DEITA6k/ https://huggingface.co/datasets/hkust-nlp/deita-6k-v0/resolve/main/deita_6k.json
 
 mkdir -p data/raw_train/DEITA10k/
-wget -P data/raw_train/DEITA10k/
-https://huggingface.co/datasets/hkust-nlp/deita-10k-v0/blob/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/DEITA10k/DEITA10k_train.parquet
+wget -P data/raw_train/DEITA10k/ https://huggingface.co/datasets/hkust-nlp/deita-10k-v0/resolve/main/deita_10k.json
 
 echo "Processing datasets..."
 python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/
