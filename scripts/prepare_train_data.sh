@@ -184,12 +184,11 @@ wget -P data/raw_train/alpagasus/ https://raw.githubusercontent.com/gpt4life/alp
 
 echo "Downloading HelpSteer dataset..."
 mkdir -p data/raw_train/HelpSteer/
-wget -P data/raw_train/HelpSteer/ https://huggingface.co/datasets/nvidia/HelpSteer/blob/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/HelpSteer/HelpSteer_train.parquet
-wget -p data/raw_train/HelpSteer/ https://huggingface.co/datasets/nvidia/HelpSteer/blob/refs%2Fconvert%2Fparquet/default/validation/0000.parquet?download=true -O data/raw_train/HelpSteer/HelpSteer_val.parquet
+wget -P data/raw_train/HelpSteer/ https://huggingface.co/datasets/nvidia/HelpSteer/resolve/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/HelpSteer/HelpSteer_train.parquet
 
 echo "Downloading orca_dpo_pairs dataset..."
 mkdir -p data/raw_train/orca_dpo_pairs/
-wget -P data/raw_train/orca_dpo_pairs/ https://huggingface.co/datasets/Intel/orca_dpo_pairs/blob/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/orca_dpo_pairs/orca_dpo_pairs_train.parquet
+wget -P data/raw_train/orca_dpo_pairs/ https://huggingface.co/datasets/Intel/orca_dpo_pairs/resolve/refs%2Fconvert%2Fparquet/default/train/0000.parquet?download=true -O data/raw_train/orca_dpo_pairs/orca_dpo_pairs_train.parquet
 
 echo "Downloading DEITA6k/10k dataset..."
 mkdir -p data/raw_train/DEITA6k/

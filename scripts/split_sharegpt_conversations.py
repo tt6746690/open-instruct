@@ -14,7 +14,7 @@ from tqdm import tqdm
 def make_sample(sample, start_idx, end_idx):
     assert (end_idx - start_idx) % 2 == 0
     return {
-        "id": sample["id"] + "_" + str(start_idx),
+        "id": str(sample["id"]) + "_" + str(start_idx),
         "conversations": sample["conversations"][start_idx:end_idx],
     }
 
