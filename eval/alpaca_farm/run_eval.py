@@ -42,6 +42,7 @@ def main(args):
                 tensor_parallel_size=torch.cuda.device_count(),
                 dtype=getattr(torch, args.torch_dtype),
             )
+            tokenizer = model.llm_engine.tokenizer
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
                 max_tokens=args.max_new_tokens,
