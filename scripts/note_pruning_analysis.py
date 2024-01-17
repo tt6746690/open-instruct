@@ -36,6 +36,82 @@ lm_output_dir = os.path.join(scripts_dir, 'model_outputs')
 text_viz_path = os.path.join(scripts_dir, 'text_viz')
 curriculum_dir = os.path.join(scripts_dir, 'curriculum')
 
+
+
+
+
+
+def save_lm_output_for_50k_subset(dataset, dataset_50k, num_proc=64):
+    """Already have model output for full dataset, save model output for 50k subset.
+    
+        ```
+        from note_pruning_analysis import save_lm_output_for_50k_subset
+        for dataset, dataset_50k in [
+            ('ultrachat200kv2', 'ultrachat50k'),
+            ('sharegptv2', 'sharegpt50k'),
+            ('wizardlmv2', 'wizardlm50k'),
+        ]:
+            save_lm_output_for_50k_subset(dataset, dataset_50k)
+        ```
+    
+    """
+
+    from open_instruct.finetune_trainer import encode_with_messages_format
+    
+    ds = get_dataset(dataset)
+    ds50k = get_dataset(dataset_50k)
+
+    tokenizer_name_or_path = get_tokenizer_name_or_path('llama-7b')
+    tokenizer = get_fast_tokenizer(tokenizer_name_or_path)
+    encode_fn = partial(encode_with_messages_format, tokenizer=tokenizer, max_seq_length=10_000)
+    def fn(example):
+        output = encode_fn(example)
+        return {'text': tokenizer.decode(output['input_ids'])}
+
+    ds = ds.map(fn, batched=False, num_proc=num_proc)
+    ds50k = ds50k.map(fn, batched=False, num_proc=num_proc)
+
+    df = ds.to_pandas()
+    df = df.reset_index()
+    df50k = ds50k.to_pandas()
+    df50k = df50k.reset_index()
+
+    if df['text'].nunique() != len(df):
+        raise ValueError(f'`df` has duplicates text nunique={df["text"].nunique()} len={len(df)}')
+    if df50k['text'].nunique() != len(df50k):
+        raise ValueError(f'`df50k` has duplicates text nunique={df50k["text"].nunique()} len={len(df50k)}')
+    
+    dfm = pd.merge(df, df50k, on='text', suffixes=(['_full', '_50k']), how='inner')
+    if len(dfm) != len(df50k):
+        raise ValueError(f'len(dfm)={len(dfm)} != len(df50k)={len(df50k)}')
+
+    dfinds = dfm.sort_values(by='index_50k')[['index_full', 'index_50k']]
+    # index into original dataset that gives 50k subset's ordering
+    inds = dfinds['index_full'].tolist()
+
+    for md, encode_fn_type in [
+        ('llama7br512p4096', 'sft'),
+        ('mpnet', 'input'),
+    ]:
+        model_name = get_full_model_name(md)
+        d = get_lm_output(dataset, model_name, encode_fn_type=encode_fn_type, return_text_embedding=True, fill_nan=False)
+        assert(all( v.shape[0]==len(ds) for k,v in d.items() ))
+        dout = {k: v[inds] for k, v in d.items()}
+        assert(all( v.shape[0]==len(ds50k) for k,v in dout.items() ))
+
+        save_dir = (f"model_outputs/{encode_fn_type}/{model_name}")
+        save_path = os.path.join(save_dir, f'{dataset_50k}.pkl')
+        if os.path.isfile(save_path):
+            print(f'save_path={save_path} already exist! dont overwrite.')
+        else:
+            with open(save_path, 'wb') as f:
+                pickle.dump(dout, f, protocol=pickle.HIGHEST_PROTOCOL)
+        din = get_lm_output(dataset_50k, model_name, encode_fn_type=encode_fn_type, return_text_embedding=True, fill_nan=False)
+        for k in din.keys():
+            assert((din[k]==dout[k]).all())
+
+
+
 def save_to_pickle(save_path, output, verbose=True):
     if verbose and 'inds' in output:
         print(f'save inds (length = {len(output["inds"])}) to {save_path}')
