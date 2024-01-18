@@ -5,7 +5,7 @@ import uuid
 # from fastchat.model.model_adapter
 OPENAI_MODEL_LIST = (
     "gpt-3.5-turbo", "gpt-3.5-turbo-0301", "gpt-3.5-turbo-0613", "gpt-3.5-turbo-1106",
-    "gpt-4", "gpt-4-0314", "gpt-4-0613", "gpt-4-turbo",)
+    "gpt-4", "gpt-4-0314", "gpt-4-0613", "gpt-4-turbo", "gpt-4-1106-preview",)
 
 
 def remove_all_symlinks(directory, verbose=False):
@@ -72,12 +72,12 @@ def get_resource_for_task(task_name, model_name_or_path):
     if arch == 'x86_64': # ccc use vllm
         if any(x in model_name_or_path for x in models_7b):
             batch_size, job_duration = 10, 1
-            if any(x in task_name for x in ['alpacafarm']):
+            if any(x in task_name for x in ['alpacafarm', 'mtbench']):
                 job_duration = 6
     else:
         if any(x in model_name_or_path for x in models_7b):
-            if any(x in task_name for x in ['bbh_s=3', 'mmlu_s=5', 'tydiqa_s=1_gp', 'alpacafarm']):
-                batch_size, job_duration = 5, 1
+            if any(x in task_name for x in ['bbh_s=3', 'mmlu_s=5', 'tydiqa_s=1_gp', 'alpacafarm', 'mtbench']):
+                batch_size, job_duration = 5, 6
             else:
-                batch_size, job_duration = 10, 1
+                batch_size, job_duration = 10, 6
     return batch_size, job_duration
