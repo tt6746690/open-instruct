@@ -254,12 +254,6 @@ def parse_args(cmd=None):
         choices=['RandomSampler', 'SequentialSampler'],
         default='RandomSampler',
     )
-    parser.add_argument(
-        '--overwrite_cache',
-        action='store_true',
-        default=False,
-        help='Overwrite the cached training and evaluation sets',
-    )
 
     if cmd is not None:
         from rosemary import jpt_parse_args
