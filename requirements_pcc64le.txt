@@ -1,5 +1,6 @@
 -e /gpfs/u/scratch/PTFM/PTFMqngp/github/rosemary
 -e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023
+-e ../FastChat[model_worker]
 /gpfs/u/home/PTFM/PTFMqngp/scratch/tools/torch-2.1.0a0+gita37b4fa-cp310-cp310-linux_ppc64le.whl
 scipy
 packaging
@@ -31,6 +32,7 @@ omegaconf
 pynvml
 openai
 tiktoken
+anthropic>=0.3
 -e /gpfs/u/scratch/PTFM/PTFMqngp/github/mitibm2023/external/alpaca_eval
 
 # ppc64le build fails

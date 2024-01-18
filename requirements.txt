@@ -1,7 +1,7 @@
 -e .
 -e ../../../mitibm2023
 -e ../alpaca_eval # some bug fixes on repetitive generation yielding openai errors
--e ../FastChat
+-e ../FastChat[model_worker,llm_judge]
 -e ../rosemary
 -e ../DPPy
 --extra-index-url https://download.pytorch.org/whl/cu118
