@@ -947,6 +947,241 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000, max_seq_leng
 
 
 
+def convert_alpagasus_data(data_dir, output_dir, num_examples=30000):
+    """
+        ```
+        import os
+        from note_pruning_analysis import filter_json_by_numtoks
+        from open_instruct.reformat_datasets import convert_alpagasus_data
+        
+        data_dir = 'data/raw_train/alpagasus'
+        output_dir = 'data/processed/alpagasus'
+        convert_alpagasus_data(data_dir, output_dir, num_examples=None)
+        filepath = os.path.join(output_dir, "chatgpt_9k.jsonl")
+        print(f"Filtering alpagasus to max_seq_length=2048...")
+        filter_json_by_numtoks(filepath, max_seq_length=2048)
+        ```
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    examples = []
+    with open(os.path.join(data_dir, "chatgpt_9k.json"), "r") as fin:
+        examples = json.load(fin)
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
+
+    output_path = os.path.join(output_dir, "chatgpt_9k.jsonl")
+    
+    with open(output_path, "w") as fout:
+        for idx, example in enumerate(examples):
+            encoded_example = encode_instruction_example(
+                instruction=example["instruction"], 
+                input=example["input"], 
+                output=example["output"],
+                random_template=True,
+                eos_token=None
+            )
+            fout.write(json.dumps({
+                "dataset": "alpagasus",
+                "id": f"alpagasus_{idx}",
+                "messages": [
+                    {"role": "user", "content": encoded_example["prompt"]},
+                    {"role": "assistant", "content": encoded_example["completion"]},
+                ]
+            }) + "\n")
+
+
+def convert_HelpSteer_data(data_dir, output_dir, num_examples=30000):
+    """
+        ```
+        import os
+        from note_pruning_analysis import filter_json_by_numtoks
+        from open_instruct.reformat_datasets import convert_HelpSteer_data
+        
+        data_dir = 'data/raw_train/HelpSteer'
+        output_dir = 'data/processed/HelpSteer'
+        convert_HelpSteer_data(data_dir, output_dir, num_examples=None)
+        filepath = os.path.join(output_dir, "HelpSteer_train.jsonl")
+        print(f"Filtering HelpSteer to max_seq_length=2048...")
+        filter_json_by_numtoks(filepath, max_seq_length=2048)
+        ```
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    dataset = 'HelpSteer'
+
+    source_filename = 'HelpSteer_train.parquet'
+    target_filename = f'{dataset}_data.jsonl'
+
+    df = pd.read_parquet(os.path.join(data_dir, source_filename))
+    if num_examples is not None:
+        df = df.sample(n=int(num_examples*1.1), random_state=0)
+    examples = [row.to_dict() for _, row in df.iterrows()]
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
+
+    output_path = os.path.join(output_dir, "HelpSteer_train.jsonl")
+    
+    with open(output_path, "w") as fout:
+        for idx, example in enumerate(examples):
+
+            fout.write(json.dumps({
+                "dataset": "HelpSteer",
+                "id": f"HelpSteer_{idx}",
+                "messages": [
+                    {"role": "user", "content": example["prompt"]},
+                    {"role": "assistant", "content": example["response"]},
+                ]
+            }) + "\n")
+    
+
+def convert_orca_dpo_pairs_data(data_dir, output_dir, num_examples=None):
+    """
+        ```
+        #### Including system prompt in the begining of the user prompt,
+        #### seperate by '\n\n' with user question
+        from open_instruct.reformat_datasets import convert_orca_dpo_pairs_data
+        data_dir = 'data/raw_train/orca_dpo_pairs'
+        output_dir = 'data/processed/orca_dpo_pairs'
+        convert_orca_dpo_pairs_data(data_dir, output_dir, num_examples=None)
+        ```
+    """
+
+    os.makedirs(output_dir, exist_ok=True)
+    dataset = 'orca_dpo_pairs'
+
+    source_filename = 'orca_dpo_pairs_train.parquet'
+    target_filename = f'{dataset}_data.jsonl'
+
+    df = pd.read_parquet(os.path.join(data_dir, source_filename))
+    if num_examples is not None:
+        df = df.sample(n=int(num_examples*1.1), random_state=0)
+    examples = [row.to_dict() for _, row in df.iterrows()]
+    
+    def convert_example_to_messages(example, index):        
+        chosen = [{'role': 'user', 'content': f"System Prompt: {example['system']}\n\n" + example['question']},
+                  {'role': 'assistant', 'content': example['chosen']}]
+        rejected = [{'role': 'user', 'content': f"System Prompt: {example['system']}\n\n" + example['question']},
+                  {'role': 'assistant', 'content': example['rejected']}]
+        assert(len(chosen) % 2 == 0 and len(rejected) % 2 == 0)
+        example = {
+            'dataset': dataset,
+            'id': f'{dataset}_{index}',
+            'chosen': chosen,
+            'rejected': rejected,
+        }
+        return example
+    examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
+    examples = filter_examples_by_numtoks(examples, max_seq_length=2048)
+    if num_examples is not None:
+        if len(examples) >= num_examples:
+            examples = examples[:num_examples]
+        else:
+            raise ValueError(f"Only {len(examples)} examples after filtering by max_seq_length=2048 but need {num_examples} examples.")
+
+    output_path = os.path.join(output_dir, target_filename)
+    with open(output_path, 'w') as fout:
+        for example in examples:
+            fout.write(json.dumps(example) + "\n")
+
+
+
+def convert_deita_data(data_dir, output_dir, data_file="deita_6k_cleaned_and_split_2048.json", num_examples=None, dataset_name="deita_sharegpt"):
+    """
+        ## first convert the deita file into a proper json file like sharegpt.json
+        import json
+        for the_k in ['6k', '10k']:
+            file_path = f'data/raw_train/DEITA{the_k}/deita_{the_k}.json'
+            parsed_json_list = []
+            
+            # Reading and parsing the file
+            with open(file_path, 'r') as file:
+                for line in file:
+                    # Each line is a separate JSON object
+                    json_object = json.loads(line)
+                    parsed_json_list.append(json_object)
+    
+            # Writing the list back to the file as JSON
+            with open(file_path, 'w') as file:
+                json.dump(parsed_json_list, file, indent=4)
+
+        ## Next split, repeat for sharegpt.json
+        python scripts/split_sharegpt_conversations.py \
+            --in-files data/raw_train/DEITA6k/deita_6k.json \
+            --out-file data/raw_train/DEITA6k/deita_6k_cleaned_and_split_2048_discardlongconv.json \
+            --model-name-or-path results/baselines/huggyllama/llama-7b \
+            --max-length 2048 \
+            --special_tok_len 8
+
+        python scripts/split_sharegpt_conversations.py \
+            --in-files data/raw_train/DEITA10k/deita_10k.json \
+            --out-file data/raw_train/DEITA10k/deita_10k_cleaned_and_split_2048_discardlongconv.json \
+            --model-name-or-path results/baselines/huggyllama/llama-7b \
+            --max-length 2048 \
+            --special_tok_len 8
+
+        set special_tok_len to 8 as max length of both user and assistant template
+            ['_<s>', '▁<', '|', 'user', '|', '>', '<0x0A>']
+            ['<0x0A>', '▁<', '|', 'ass', 'istant', '|', '>', '<0x0A>']
+
+        ```
+        from open_instruct.reformat_datasets import convert_deita_data
+
+        data_dir = 'data/raw_train/DEITA6k'
+        output_dir = 'data/processed/DEITA6k'
+        convert_deita_data(data_dir, output_dir, data_file="deita_6k_cleaned_and_split_2048_discardlongconv.json", dataset_name="deita_sharegpt")
+        
+        data_dir = 'data/raw_train/DEITA10k'
+        output_dir = 'data/processed/DEITA10k'
+        convert_deita_data(data_dir, output_dir, data_file="deita_10k_cleaned_and_split_2048_discardlongconv.json", dataset_name="deita_sharegpt")
+        ```
+ 
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    examples = []
+    with open(os.path.join(data_dir, data_file), "r") as fin:
+        examples.extend(json.load(fin))
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
+
+    output_path = os.path.join(output_dir, f"{dataset_name}_data.jsonl")
+    with open(output_path, "w") as fout:
+        invalid_cnt = 0
+        for idx, example in enumerate(examples):
+            messages = []
+            valid = True
+            for message in example["conversations"]:
+                if message["from"] == "human" or message["from"] == "user":
+                    messages.append({
+                        "role": "user",
+                        "content": message["value"]
+                    })
+                elif message["from"] == "gpt" or message["from"] == "chatgpt":
+                    messages.append({
+                        "role": "assistant",
+                        "content": message["value"]
+                    })
+                elif message["from"] == "system":
+                    valid = False
+                    invalid_cnt += 1
+                    break
+                elif message["from"] == "bing":
+                    valid = False
+                    invalid_cnt += 1
+                    break
+                else:
+                    raise ValueError(f"Unknown message sender: {message['from']}")
+            if messages and valid:
+                fout.write(json.dumps({
+                    "dataset": dataset_name,
+                    "id": f"sharegpt_{example['id']}",
+                    "messages": messages
+                }) + "\n")
+        if invalid_cnt > 0:
+            print(f"# of invalid examples in sharegpt data: {invalid_cnt}")
+            
+
+
+
 def convert_shp_data(data_dir, output_dir, num_examples=None, max_seq_length=None):
     """
         ```
