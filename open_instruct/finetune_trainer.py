@@ -699,7 +699,7 @@ def main():
         lm_datasets.set_format(type="pt")
         # ## retain data points with at least one label not equal to -100
         # # however, this messes up data ordering. for now just comment this out.
-        lm_datasets = lm_datasets.filter(lambda example: (example['labels'] != -100).any())
+        # lm_datasets = lm_datasets.filter(lambda example: (example['labels'] != -100).any())
         if len(lm_datasets.filter(lambda example: not (example['labels'] != -100).any(), num_proc=16)['train']) != 0:
             logger.info('[wpq] Some data points have all labels equal to -100. This should not happen since data longer than max_seq_length is discarded.')
 
