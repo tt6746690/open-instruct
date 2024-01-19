@@ -579,6 +579,8 @@ def main():
         n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
         logger.info(f"Training new model from scratch - Total size={n_params/2**20:.2f}M params")
 
+    logger.info(f'[wpq] model.dtype={model.dtype}')
+
     # wpq: `use_cache=True` is incompatible with gradient checkpointing
     model.config.use_cache = True if not training_args.gradient_checkpointing else False
 

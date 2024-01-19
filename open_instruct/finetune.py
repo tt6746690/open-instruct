@@ -449,7 +449,6 @@ def main():
                 config=config,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 use_flash_attention_2=True if args.use_flash_attn else False,
-                torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32, # wpq: during 12/12 rebase. float16 might experience instability issue. set to float32 for now.
             )
     else:
         logger.info("Training new model from scratch")
