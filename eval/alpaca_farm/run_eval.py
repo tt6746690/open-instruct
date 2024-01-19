@@ -16,7 +16,7 @@ def main(args):
     os.makedirs(args.save_dir, exist_ok=True)
 
     logging.info("loading data and model...")
-    alpaca_eval_data = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval")["eval"]
+    alpaca_eval_data = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval", trust_remote_code=True)["eval"]
 
     if args.max_num_examples and len(alpaca_eval_data) > args.max_num_examples:
         inds = random.sample(range(len(alpaca_eval_data)), args.max_num_examples)

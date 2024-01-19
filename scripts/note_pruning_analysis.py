@@ -976,6 +976,9 @@ def update_metrics_with_highly_repeated_chars(
         metrics.update(d)
         with open(metrics_file, 'w') as f:
             json.dump(metrics, f)
+
+    dsf = ds.filter(lambda x: x['output_2_highlyrepeated']==1., num_proc=4)
+    dsf.to_json(os.path.join(save_dir, 'repeated_generation.jsonl'))
             
     return ds, d
 
