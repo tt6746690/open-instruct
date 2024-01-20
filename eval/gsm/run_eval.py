@@ -86,6 +86,7 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
                 dtype=getattr(torch, args.torch_dtype),
+                swap_space=8, # 4->8 due to insufficient cpu swap space causing failures.
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,

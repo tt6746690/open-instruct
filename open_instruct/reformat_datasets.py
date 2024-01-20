@@ -357,7 +357,7 @@ def convert_stanford_alpaca_data(data_dir, output_dir, num_examples=None, max_se
         examples.extend(json.load(fin))
     if num_examples:
         random.seed(0)
-        examples = random.sample(examples, k=min(num_examples*1.1, len(examples)))
+        examples = random.sample(examples, k=min(int(num_examples*1.1), len(examples)))
     
     def convert_example_to_messages(example, idx):
         encoded_example = encode_instruction_example(

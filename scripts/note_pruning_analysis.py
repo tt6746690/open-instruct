@@ -52,7 +52,6 @@ def save_lm_output_for_50k_subset(dataset, dataset_50k, num_proc=64):
         ```
     
     """
-
     from open_instruct.finetune_trainer import encode_with_messages_format
     
     ds = get_dataset(dataset)
@@ -87,7 +86,7 @@ def save_lm_output_for_50k_subset(dataset, dataset_50k, num_proc=64):
     inds = dfinds['index_full'].tolist()
 
     for md, encode_fn_type in [
-        ('llama7br512p4096', 'sft'),
+        ('llama7br512p4096', 'sft'), 
         ('mpnet', 'input'),
     ]:
         model_name = get_full_model_name(md)
@@ -173,6 +172,7 @@ dataset_with_multiple_version = [
     'ultrafeedback',
     'unnatural_instructions',
     'wizardlm',
+    'mix',
 ]
 
 dataset_with_train_val_split = [
