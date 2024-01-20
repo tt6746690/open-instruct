@@ -512,7 +512,7 @@ def main():
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
-            cache_dir=model_args.cache_dir if model_args.cache_dir else os.path.dirname(data_files['train']),
+            cache_dir=model_args.cache_dir,
             **dataset_args,
         )
         if 'test' in data_files:
@@ -579,7 +579,8 @@ def main():
         n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
         logger.info(f"Training new model from scratch - Total size={n_params/2**20:.2f}M params")
 
-    logger.info(f'[wpq] model.dtype={model.dtype}')
+    if training_args.distributed_state.is_main_process:
+        logger.info(f'[wpq] model.dtype={model.dtype}')
 
     # wpq: `use_cache=True` is incompatible with gradient checkpointing
     model.config.use_cache = True if not training_args.gradient_checkpointing else False
@@ -738,8 +739,9 @@ def main():
             train_dataset = train_dataset.select(range(max_train_samples))
 
     ## print a few examples
-    print('[wpq] Example 0 of train_dataset: ')
-    print(train_dataset[0])
+    if training_args.distributed_state.is_main_process:
+        print('[wpq] Example 0 of train_dataset: ')
+        print(train_dataset[0])
 
     # initalize a trainer
     # here we use a custom trainer that moves the model to CPU when saving the checkpoint in FSDP mode
