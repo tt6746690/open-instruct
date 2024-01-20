@@ -322,7 +322,13 @@ class ModelArguments:
             )
         },
     )
-
+    save_model_torch_dtype: Optional[str] = field(
+        default="float16",
+        metadata={
+            "help": "The 1/2 precision dtype to save the model in.",
+            "choices": ["bfloat16", "float16"],
+        },
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -764,6 +770,33 @@ def main():
             checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()  # Saves the tokenizer too for easy upload
+
+        ## wpq: convert fp32 weights (if exists) to half precision weights in safetensors to save disk space.
+        import glob, time
+        from transformers.utils import WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME
+        model_bin_file = os.path.join(training_args.output_dir, WEIGHTS_NAME)
+        if model_args.save_model_torch_dtype is not None and \
+                os.path.isfile(model_bin_file) and \
+                (model_args.save_model_torch_dtype != model_args.torch_dtype):
+            t0 = time.time()
+            convert_dtype_model = AutoModelForCausalLM.from_pretrained(
+                training_args.output_dir,
+                device_map='cpu',
+                torch_dtype=getattr(torch, model_args.save_model_torch_dtype)
+            )
+            convert_dtype_model.save_pretrained(
+                training_args.output_dir,
+                is_main_process=training_args.distributed_state.is_main_process,
+                safe_serialization=True,
+            )
+            logger.info(f'[wpq] convert_dtype_model.from_pretrained+save_pretrained took {time.time()-t0:.2f}s')
+            safe_files = glob.glob(os.path.join(training_args.output_dir, 'model*.safetensors'))
+            if len(safe_files) > 0 and os.path.isfile(os.path.join(training_args.output_dir, SAFE_WEIGHTS_INDEX_NAME)):
+                os.remove(model_bin_file)
+                logger.info(f'[wpq] remove {model_bin_file}')
+            else:
+                logger.info(f'[wpq] `save_pretrained` in safetensors not found. so keep {model_bin_file}')
+        ##
 
         metrics = train_result.metrics
 

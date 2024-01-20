@@ -18,7 +18,7 @@ evaluate>=0.4.0
 tokenizers>=0.13.3
 protobuf
 # transformers==4.35.2 ## issues with using flash attention 2 with mixed-precision.
-git+https://github.com/huggingface/transformers.git@3f69f415adcbdaedec154ba8eac220ef3276975d
+git+https://github.com/huggingface/transformers.git@def581ef51f78326a3f56de9cf9c637c47b920ad
 huggingface_hub
 openai<=0.28.1
 tiktoken
