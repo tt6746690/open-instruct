@@ -20,6 +20,8 @@ import os
 import sys
 import json
 import re
+import glob
+import time
 import warnings
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List
@@ -52,7 +54,9 @@ from transformers import (
 )
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers.trainer_utils import get_last_checkpoint
+from transformers.utils import WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME
 
+        
 
 # ##### wpq: sub-class `get_train_dataloader` to add option to not shuffle the dataset
 
@@ -417,7 +421,10 @@ def main():
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
 
-    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir and os.path.isfile(os.path.join(training_args.output_dir, 'pytorch_model.bin')):
+    if os.path.isdir(training_args.output_dir) and \
+            training_args.do_train and \
+            not training_args.overwrite_output_dir and \
+            (os.path.isfile(os.path.join(training_args.output_dir, 'pytorch_model.bin')) or os.path.isfile(os.path.join(training_args.output_dir, SAFE_WEIGHTS_INDEX_NAME))):
         print('Finished training already. Exit now.')
         return
 
@@ -772,8 +779,6 @@ def main():
         trainer.save_model()  # Saves the tokenizer too for easy upload
 
         ## wpq: convert fp32 weights (if exists) to half precision weights in safetensors to save disk space.
-        import glob, time
-        from transformers.utils import WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME
         model_bin_file = os.path.join(training_args.output_dir, WEIGHTS_NAME)
         if model_args.save_model_torch_dtype is not None and \
                 os.path.isfile(model_bin_file) and \

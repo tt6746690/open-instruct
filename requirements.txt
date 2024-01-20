@@ -17,8 +17,7 @@ peft>=0.4.0
 evaluate>=0.4.0
 tokenizers>=0.13.3
 protobuf
-# transformers==4.35.2 ## issues with using flash attention 2 with mixed-precision.
-git+https://github.com/huggingface/transformers.git@def581ef51f78326a3f56de9cf9c637c47b920ad
+# transformers==4.35.2 ## issues with using flash attention 2 with mixed-precision. git+https://github.com/huggingface/transformers.git@def581ef51f78326a3f56de9cf9c637c47b920ad fa2 works, but model not saved if using fsdp.
 huggingface_hub
 openai<=0.28.1
 tiktoken
