@@ -280,21 +280,10 @@ def load_hf_lm_and_tokenizer(
             'torch_dtype': torch_dtype,
             'load_in_8bit': load_in_8bit,
         }
-        if  't5' in model_name_or_path:
-            from transformers import T5ForConditionalGeneration
-            model = T5ForConditionalGeneration.from_pretrained(
-                model_name_or_path, **from_pretrained_kwargs)
-        elif 'mpt' in model_name_or_path: 
-            config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-            config.attn_config['attn_impl'] = 'triton'
-            config.init_device = 'cuda' # For fast initialization directly on GPU!
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name_or_path, trust_remote_code=True, config=config, **from_pretrained_kwargs)
-        else:
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name_or_path,
-                **from_pretrained_kwargs,
-            )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name_or_path,
+            **from_pretrained_kwargs,
+        )
         if convert_to_half:
             model = model.half()
     model.eval()

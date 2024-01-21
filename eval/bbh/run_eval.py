@@ -204,8 +204,8 @@ def main(args):
     # save the performance
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
         performance["average_exact_match"] = sum(performance.values()) / len(performance)
-        print(f"Average EM: {performance['average_exact_match']}")
         json.dump(performance, fout, indent=4)
+        print(f"Average EM: {performance['average_exact_match']}")
 
 
 if __name__ == "__main__":
