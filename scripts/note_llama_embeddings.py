@@ -898,6 +898,7 @@ def compute_lm_outputs(
     loader = DataLoader(train_dataset, shuffle=False, batch_size=1, pin_memory=True) 
 
     grad_statistic_patterns = get_grad_statistic_pattern(model_name_or_path, use_lora)
+    print(f'grad_statistic_patterns: {grad_statistic_patterns}')
 
     output = defaultdict(list)
     for i, batch in tqdm(enumerate(loader), disable=rank!=0, total=len(loader)):

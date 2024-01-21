@@ -21,6 +21,7 @@ import json
 import random
 import re
 import os
+import glob
 import pandas as pd
 import argparse
 from open_instruct.instruction_encode_templates import encode_instruction_example, encode_few_shot_example
@@ -1702,6 +1703,88 @@ def generate_50k_sft_datasets():
             **extra_kwargs)
 
 
+
+def generate_mixes(raw_data_dir, output_dir, mix_name, mix_proportions, dataset_size):
+    """
+        ```
+        from open_instruct.reformat_datasets import generate_mixes
+        raw_data_dir = 'data/raw_train'
+        output_dir = 'data/processed'    
+        dataset_size = 50_000
+        mix_name = 'mix_redundant'
+        mix_proportions = {
+            'dolly': .25,
+            'flan_v2': .25,
+            'stanford_alpaca': .25,
+            'oasst2': .25,
+        }
+        mix_name = 'mix_diverse'
+        mix_proportions = {
+            'wizardlm': 1/3,
+            'sharegpt': 1/3,
+            'ultrachat': 1/3,
+        }
+        generate_mixes(raw_data_dir, output_dir, mix_name, mix_proportions, dataset_size)
+        ```
+    """
+
+    mix_sizes = {k: int(v*dataset_size) for k, v in mix_proportions.items()}
+    last = list(mix_sizes.keys())[-1]
+    mix_sizes[last] = dataset_size - sum([v for k, v in mix_sizes.items() if k!=last])
+
+    if sum(mix_sizes.values()) != dataset_size:
+        raise ValueError(f"mix sizes {mix_sizes} should sum up to {dataset_size}")
+    
+    for sub_dataset in mix_sizes.keys():
+        convert_kwargs = {
+            'data_dir': os.path.join(raw_data_dir, sub_dataset),
+            'output_dir': os.path.join(raw_data_dir, 'mix', mix_name, sub_dataset),
+            'num_examples': mix_sizes[sub_dataset],
+            'max_seq_length': 2048,
+        }
+        if sub_dataset in ['oasst2', 'oasst1']:
+            convert_fn = 'convert_oasst_data'
+            convert_kwargs.update({
+                'data_dir': os.path.join(raw_data_dir, 'oasst'),
+                'source_filename': "2023-04-12_oasst_ready.trees.jsonl" if sub_dataset=='oasst1' else \
+                    "2023-11-05_oasst2_ready.trees.jsonl",
+                'dataset_name': sub_dataset,
+            })
+        elif sub_dataset == 'sharegpt':
+            convert_fn = 'convert_sharegpt_data'
+            convert_kwargs.update({
+                'data_file': "sharegpt_html_cleaned_and_split_2048_discardlongconv.json",
+            })
+        elif sub_dataset == 'ultrachat':
+            convert_fn = 'convert_ultrachat_data'
+            convert_kwargs.update({
+                'dataset_name': 'ultrachat200k',
+            })
+        else:
+            convert_fn = f'convert_{sub_dataset}_data'
+        globals()[convert_fn](**convert_kwargs)
+
+
+    subset_files = glob.glob(os.path.join(raw_data_dir, 'mix', mix_name, '*/*'))
+    subset_files = [x for x in subset_files if 'test' not in x]
+    print(f'Concatenating files: {subset_files}')
+    examples = []
+    for subset_file in subset_files:
+        with open(subset_file, "r") as fin:
+            for line in fin:
+                examples.append(json.loads(line))
+    random.seed(0)
+    random.shuffle(examples)
+
+    os.makedirs(os.path.join(output_dir, 'mix'), exist_ok=True)
+    with open(os.path.join(output_dir, 'mix', f'{mix_name}_data.jsonl'), 'w') as f:
+        for example in examples:
+            f.write(json.dumps(example) + "\n")
+
+        
+
+
+        
 
 if __name__ == "__main__":
     # all supported datasets    
