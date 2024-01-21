@@ -540,9 +540,14 @@ def check_md_and_model_name_match(sort_by, model_name):
 
 
     
-def main(dataset, sort_by, save_dir, model_name):
+def main(dataset, sort_by, save_dir, model_name, overwrite):
 
     check_md_and_model_name_match(sort_by, model_name)
+
+    save_path = os.path.join('curriculum', model_name, dataset, sort_by, 'scores.pkl')
+    if (not overwrite) and os.path.isfile(save_path):
+        print(f'Curriculum already generated so do nothing: {save_path}')
+        return
 
     pkl_extra = {}
 
@@ -594,6 +599,7 @@ if __name__ == '__main__':
     parser.add_argument("--sort_by", type=str, default="prob")
     parser.add_argument("--model_name", type=str, default="llama-7b")
     parser.add_argument("--save_dir", type=str, default="/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/data_inds/")
+    parser.add_argument("--overwrite", action='store_true', default=False, help="overwrite existing results")
     args = parser.parse_args()
 
     print(json.dumps(vars(args), indent=2))
