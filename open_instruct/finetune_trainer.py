@@ -512,7 +512,6 @@ def main():
             cache_dir=model_args.cache_dir,
             token=model_args.token,
             streaming=data_args.streaming,
-            download_mode=datasets.GenerateMode.FORCE_REDOWNLOAD if data_args.overwrite_cache else datasets.GenerateMode.REUSE_DATASET_IF_EXISTS,
         )
     else: 
         data_files = {}

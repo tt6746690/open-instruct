@@ -40,6 +40,7 @@ from transformers import (
     OPTForCausalLM,
     BitsAndBytesConfig,
 )
+from transformers.utils import WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_INDEX_NAME
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from dpo_utils import dpo_loss, concatenated_forward, DataCollatorForSeq2SeqDPO
 
@@ -348,7 +349,7 @@ def encode_with_messages_format(example, tokenizer, max_seq_length):
 
 
 
-def rename_state_dict_file_if_model_is_sharded(folder):
+def remove_state_dict_file_if_model_is_sharded(folder):
     from transformers.utils import WEIGHTS_NAME, WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_INDEX_NAME
     from transformers.utils import is_safetensors_available
 
@@ -361,10 +362,9 @@ def rename_state_dict_file_if_model_is_sharded(folder):
     safe_index_present = os.path.isfile(safe_index_file)
     is_sharded = index_present or (safe_index_present and is_safetensors_available())
     if weights_present and is_sharded:
-        weights_name_new = WEIGHTS_NAME+'.renamed_to_load_model_properly'
         print(f'both {WEIGHTS_NAME} and model shards exists under {folder}.\n'
-              f'Rename {WEIGHTS_NAME} -> {weights_name_new}')
-        os.rename(weights_file, os.path.join(folder, weights_name_new))
+              f'Remove {WEIGHTS_NAME}')
+        os.remove(os.path.join(folder, WEIGHTS_NAME))
 
 
 
@@ -398,7 +398,7 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
         )
     # wpq: both `pytorch_model.bin` (without containing actual weights) and its sharded are present, rename `pytorch_model.bin` so that `from_pretrained` can load the model properly from model shards.
     if accelerator.is_main_process:
-        rename_state_dict_file_if_model_is_sharded(output_dir)
+        remove_state_dict_file_if_model_is_sharded(output_dir)
 
 
 # from trl, we have to prep the ref model separately.
@@ -456,6 +456,12 @@ def main():
     args = parse_args()
 
 
+    if os.path.isdir(args.output_dir) and \
+            (os.path.isfile(os.path.join(args.output_dir, 'pytorch_model.bin')) or os.path.isfile(os.path.join(args.output_dir, SAFE_WEIGHTS_INDEX_NAME)) or os.path.isfile(os.path.join(args.output_dir, WEIGHTS_INDEX_NAME))):
+        print('Finished training already. Exit now.')
+        return
+
+
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
@@ -505,7 +511,6 @@ def main():
         raw_datasets = load_dataset(
             args.dataset_name,
             args.dataset_config_name,
-            download_mode=datasets.GenerateMode.FORCE_REDOWNLOAD if args.overwrite_cache else datasets.GenerateMode.REUSE_DATASET_IF_EXISTS,
         )
     else:
         data_files = {}
@@ -515,7 +520,7 @@ def main():
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
-            download_mode=datasets.GenerateMode.FORCE_REDOWNLOAD if args.overwrite_cache else datasets.GenerateMode.REUSE_DATASET_IF_EXISTS,
+            # download_mode=datasets.DownloadMode.FORCE_REDOWNLOAD if args.overwrite_cache else datasets.DownloadMode.REUSE_DATASET_IF_EXISTS,
             **dataset_args,
         )
 
