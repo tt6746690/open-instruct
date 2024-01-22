@@ -1022,15 +1022,20 @@ def get_alpacafarm_generations(save_dirs, filter_fn_name=None, task='alpacafarm_
             filter_fn = lambda row: row['preference_0'] == 2. and row['preference_1'] == 1.
         elif filter_fn_name == 'll':
             filter_fn = lambda row: row['preference_0'] == 1. and row['preference_1'] == 1.
+        elif filter_fn_name == 'ww':
+            filter_fn = lambda row: row['preference_0'] == 2. and row['preference_1'] == 2.
         else:
             raise ValueError(f'Unknown filter_fn_name={filter_fn_name}')
         df = df[df.apply(filter_fn, axis=1)]
-    df = df.reset_index(drop=True)
+
+    d = {1: 'lose (vs. davinci003)', 2: 'win (vs. davinci003)'}
+    df = df.replace({"preference_0": d, 'preference_1': d})
+
     df = df.reset_index(drop=False)
 
     if save_path is not None:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        df.to_json(save_path, orient='records', indent=4, index=True)
+        df.to_json(save_path.replace('.json', f'_{len(df)}.json'), orient='records', indent=4)
 
     return df
 
