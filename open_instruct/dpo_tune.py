@@ -944,7 +944,6 @@ def main():
     if args.with_tracking:
         accelerator.end_training()
 
-    accelerator.save_state(os.path.join(args.output_dir, 'checkpoint-last'))
     save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
     clean_checkpoints(accelerator, args.output_dir, keep_n=1)
 
