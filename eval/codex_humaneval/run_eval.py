@@ -48,7 +48,7 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
                 dtype=getattr(torch, args.torch_dtype),
-                swap_space=16, # 4-> 16 needs more cpu swap. https://github.com/vllm-project/vllm/issues/787
+                swap_space=32, # 4-> 16 needs more cpu swap. https://github.com/vllm-project/vllm/issues/787
             )
             sampling_params = vllm.SamplingParams(
                 n=args.unbiased_sampling_size_n,

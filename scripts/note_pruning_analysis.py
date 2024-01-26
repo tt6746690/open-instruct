@@ -910,12 +910,15 @@ def update_metrics_with_highly_repeated_chars(
         save_dir,
         num_repeated_substr_threshold=100,
         repeated_str_len=3, 
-        update_metrics_file=False):
+        update_metrics_file=False,
+        num_proc=1):
     """Update `metrics.json` in alpacaeval with 
             - percentage counts of highly repeated generations.
             - win-rate adjusted for repetitive outputs (always give base model a win). 
             
         ```
+        import glob
+        from note_pruning_analysis import update_metrics_with_highly_repeated_chars
         save_dirs = glob.glob('results/*/*/eval/alpacafarm*/')
         save_dirs = glob.glob('results/baselines/*/*/eval/alpacafarm*/')
         from tqdm import tqdm
@@ -925,17 +928,22 @@ def update_metrics_with_highly_repeated_chars(
                 save_dir,
                 num_repeated_substr_threshold=100,
                 repeated_str_len=3,
+                num_proc=8,
                 update_metrics_file=True)
         ```
             
     """
     from datasets import Dataset
 
+    tokenizer_name_or_path = get_tokenizer_name_or_path('llama-7b')
+    tokenizer = get_fast_tokenizer(tokenizer_name_or_path)
+
     ann_file = os.path.join(save_dir, 'annotations.json')
     metrics_file = os.path.join(save_dir, 'metrics.json')
 
-    if not os.path.isfile(metrics_file) or not os.path.isfile(metrics_file):
-        return None, None
+    if not (os.path.isfile(ann_file) and os.path.isfile(metrics_file)):
+        print(f'ann_file={ann_file} or metrics_file={metrics_file} does not exist, skip.')
+        return (None, None)
 
     with open(ann_file, 'r') as f:
         data = json.load(f)
@@ -949,7 +957,7 @@ def update_metrics_with_highly_repeated_chars(
             if ' '*repeated_str_len in d: del d[' '*repeated_str_len] # skip white space for coding
             output[f'{k}_repchar'] = str(d)
             output[f'{k}_maxrepchar'] = max(list(d.values())) if d else 0
-            
+
         # Always set base model win if following holds
         #     - base model not repetitive  
         #     - evaluated model highly repetitive 
@@ -958,16 +966,26 @@ def update_metrics_with_highly_repeated_chars(
         preference = example['preference']
         if not output_1_highlyrepeated and output_2_highlyrepeated:
             preference = 1.
-        output.update({'preference_repetition_adjusted': preference,
+        if preference is None: # just favors gpt3 if preference is not available
+            preference = 1
+        output.update({'preference_repetition_adjusted': float(preference),
                        'output_1_highlyrepeated': float(output_1_highlyrepeated),
                        'output_2_highlyrepeated': float(output_2_highlyrepeated),})
+        
+        # adjust output token lengths as well
+        d = tokenizer(example['output_2'])
+        output.update({'output_2_tok_length': len(d['input_ids']),
+                       'output_2_tok_length_adjusted': -1 if output_2_highlyrepeated else len(d['input_ids'])})
+        
         return output
-    ds = ds.map(compute_preference_adjust_by_repetitiveness, num_proc=1)
+    ds = ds.map(compute_preference_adjust_by_repetitiveness, num_proc=num_proc)
 
     d = {
         'output_1_highlyrepeated': np.sum(ds['output_1_highlyrepeated'])/len(ds) * 100,
         'output_2_highlyrepeated': np.sum(ds['output_2_highlyrepeated'])/len(ds) * 100,
         'win_rate_repetition_adjusted': compute_win_rate(ds['preference_repetition_adjusted']) * 100,
+        'output_2_tok_length_median': np.median(ds['output_2_tok_length']),
+        'output_2_tok_length_adjusted': np.mean([x for x in ds['output_2_tok_length_adjusted'] if x!=-1]),
     }
     
     if update_metrics_file:
