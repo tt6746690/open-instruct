@@ -4,6 +4,7 @@ import time
 import json
 import glob
 import pickle
+import math
 from functools import partial
 from dataclasses import dataclass, field
 from tqdm import tqdm
@@ -339,6 +340,55 @@ def torch_rbf_kernel(X, Y=None, gamma=1.0):
     return K
 
 
+
+def torch_acos0_kernel(X, Y=None):
+    """ arccosine n=0 kernel. k(x,y) = 1 - 1/π cos^{-1}( x ̇y / ||x|| ||y|| )  
+        https://gpflow.github.io/GPflow/develop/_modules/gpflow/kernels/misc.html#ArcCosine
+
+        assumes X, Y are normalized row-wise
+        """
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
+    Xnorm = torch.clamp(torch.norm(X, p=2, dim=1, keepdim=True), min=1e-10)
+    Ynorm = torch.clamp(torch.norm(Y, p=2, dim=1, keepdim=True), min=1e-10)
+    X = X/Xnorm
+    Y = Y/Ynorm
+    S = X@Y.T
+    jitter = 1e-6
+    θ = torch.acos( jitter + (1 - 2*jitter)*S )
+    J = math.pi - θ
+    K = (1/math.pi) * J
+    K = torch.clamp(K, min=0)
+    return K
+
+
+
+def torch_acos1_kernel(X, Y=None):
+    """ arccosine n=0 kernel. k(x,y) = 1 - 1/π cos^{-1}( x ̇y / ||x|| ||y|| )  
+        https://gpflow.github.io/GPflow/develop/_modules/gpflow/kernels/misc.html#ArcCosine
+
+        assumes X, Y are normalized row-wise
+        """
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
+    Xnorm = torch.clamp(torch.norm(X, p=2, dim=1, keepdim=True), min=1e-10)
+    Ynorm = torch.clamp(torch.norm(Y, p=2, dim=1, keepdim=True), min=1e-10)
+    X = X/Xnorm
+    Y = Y/Ynorm
+    S = X@Y.T
+    jitter = 1e-6
+    θ = torch.acos( jitter + (1 - 2*jitter)*S )
+    J = torch.sin(θ) + (math.pi - θ)*torch.cos(θ)
+    K = (1/math.pi) * Xnorm * J * Ynorm.T
+    K = torch.clamp(K, min=0)
+    return K
+
+
+
 def matmul_mem_efficient(a, b, device='cuda', split_dim=1, gpu_mem_budget=.1):
     """assume `b` is more memory intensive
         put `a` into gpu memory by default.
@@ -588,6 +638,10 @@ def compute_dppmap(
         kernel_fn = partial(torch_vmf_kernel, **kernel_kwargs)
     elif kernel_type == 'rbf':
         kernel_fn = partial(torch_rbf_kernel, **kernel_kwargs)
+    elif kernel_type == 'acos0':
+        kernel_fn = partial(torch_acos0_kernel, **kernel_kwargs)
+    elif kernel_type == 'acos1':
+        kernel_fn = partial(torch_acos1_kernel, **kernel_kwargs)
     elif kernel_type == 'lin':
         kernel_fn = partial(torch_linear_kernel, **kernel_kwargs)
     else:
