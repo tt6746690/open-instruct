@@ -179,8 +179,9 @@ dataset_with_train_val_split = [
     'ultrachat200k',
     'ultrachat50k',
 ]
-    
-def get_dataset(dataset, processed=True):
+
+
+def get_dataset_train_file(dataset, processed=True):
     if dataset.endswith(('jsonl', 'json')):
         train_file = dataset
     else:
@@ -208,11 +209,70 @@ def get_dataset(dataset, processed=True):
                 train_file = os.path.join(data_raw_dir, 'starcoder', f'{dataset}.json')
             else:
                 train_file = os.path.join(data_raw_dir, dataset)
+    return train_file
+
+    
+def get_dataset(dataset, processed=True):
+    """Get dataset from `data/processed` or `data/raw_train`. """
+    train_file = get_dataset_train_file(dataset, processed=processed)
     ds = load_dataset(
         'json', 
         data_files={'train': train_file}, 
         split='train')
     return ds
+
+
+
+def combine_existing_datasets_processed_texts_and_lm_output(mix_name, mix_datasets, data_processed_dir, model_output_dir):
+    """combine jsonl text files & combine model_output for llama7b
+
+        from note_pruning_analysis import combine_existing_datasets_processed_texts_and_lm_output
+        model_output_dir = '/gpfs/u/home/PTFM/PTFMqngp/scratch/github/mitibm2023/external/open-instruct/scripts/model_outputs/sft/llama-7b+lora:r=512:a=11585+proj=4096'
+        data_processed_dir = 'data/processed'    
+        mix_name = 'mix_all50k'
+        mix_datasets = ['dolly', 'flan_v250k', 'stanford_alpaca50k', 'oasst2', 'wizardlm50k', 'sharegpt50k', 'ultrachat50k'] # order matters!
+        combine_existing_datasets_processed_texts_and_lm_output(mix_name, mix_datasets, data_processed_dir, model_output_dir)
+    """
+    from note_pruning_analysis import get_dataset_train_file
+    import numpy as np
+    import os, json, pickle
+
+    ## processed texts
+    counts = 0
+    save_path = os.path.join(data_processed_dir, 'mix', f'{mix_name}_data.jsonl')
+    with open(save_path, 'w') as fout:
+        for dataset in mix_datasets:
+            json_file = get_dataset_train_file(dataset)
+            print(json_file)
+            with open(json_file, 'r') as fin:
+                for line in fin:
+                    example = json.loads(line)
+                    fout.write(json.dumps({
+                        'dataset': example['dataset'],
+                        'id': example['id'],
+                        'messages': [{'role': x['role'], 'content': x['content']} for x in example['messages']],
+                    }) + "\n")
+                    counts += 1
+    print(f'save {counts} examples to {save_path}')
+
+    ## lm outputs
+    output_list = []
+    for dataset in mix_datasets:
+        save_path = os.path.join(model_output_dir, f'{dataset}.pkl')
+        with open(save_path, 'rb') as f:
+            output = pickle.load(f)
+        output_list.append(output)
+
+    output = {}
+    for k in output_list[0].keys():
+        output[k] = np.vstack([x[k] for x in output_list])
+
+    save_path = os.path.join(model_output_dir, f'{mix_name}.pkl')
+    with open(save_path, 'wb') as f:
+        pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    print(f'Combining lm_outputs for {mix_name}')
+    print(f'Save output={[(k, v.shape) for k, v in output.items()]} to {save_path}')
 
 
 

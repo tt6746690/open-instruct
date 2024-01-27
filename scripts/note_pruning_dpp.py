@@ -356,7 +356,8 @@ def torch_acos0_kernel(X, Y=None):
     X = X/Xnorm
     Y = Y/Ynorm
     S = X@Y.T
-    jitter = 1e-6
+    S = torch.clamp(S, min=-1, max=1)
+    jitter = 1e-7
     θ = torch.acos( jitter + (1 - 2*jitter)*S )
     J = math.pi - θ
     K = (1/math.pi) * J
@@ -380,7 +381,8 @@ def torch_acos1_kernel(X, Y=None):
     X = X/Xnorm
     Y = Y/Ynorm
     S = X@Y.T
-    jitter = 1e-6
+    S = torch.clamp(S, min=-1, max=1)
+    jitter = 1e-7
     θ = torch.acos( jitter + (1 - 2*jitter)*S )
     J = torch.sin(θ) + (math.pi - θ)*torch.cos(θ)
     K = (1/math.pi) * Xnorm * J * Ynorm.T

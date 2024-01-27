@@ -94,10 +94,12 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
     else:
         kernel_kwargs = {}
 
-    if dataset != 'ultrachat15':
-        max_length = 55_000
-    else:
+    if dataset == 'ultrachat15':
         max_length = 20_000
+    elif dataset == 'mix_all50k':
+        max_length = 100_000
+    else:
+        max_length = 55_000
 
     prespecified_ordering = re.sub(':', '_', re.sub('@', '=', kvs['ord'])) if 'ord' in kvs else None
     if prespecified_ordering:
@@ -362,14 +364,15 @@ def compute_ranking_dedup(sort_by, dataset):
         ```
         from note_pruning import compute_ranking_dedup
         dataset = 'lima'
-        sort_by = 'dedup_md=mpnet_emb=text+embedding'
+        sort_by = 'dedup_dist=cd_md=mpnet_emb=text+embedding'
         Sd = compute_ranking_dedup(sort_by, dataset)
         ```
     """
 
     kvs = parse_kv_from_string(sort_by)
     model_name = get_full_model_name(kvs['md'])
-    dist = 'cd' if kvs['md'] in ['mpnet', 'bge'] else 'l2'
+    dist = kvs['dist']
+    assert(dist in ['cd', 'l2'])
     embed_type = re.sub(r'[+]', '_', kvs['emb'])
     encode_fn_type = get_encode_fn_type(kvs['md'], dataset)
     d = get_lm_output(dataset, model_name, encode_fn_type=encode_fn_type, return_text_embedding=True)
