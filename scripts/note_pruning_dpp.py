@@ -516,8 +516,7 @@ def torch_dppmap_memefficient(Ki_fn,
                 pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
         pbar.set_postfix({'di^2: ': state.marginal_gains[-1]})
 
-                
-    if save_dir is not None:
+    if save_dir is not None and M < 70_000: # try to keep dppmapstate for these long runs just in case.
         if os.path.isfile(state_save_path):
             os.remove(state_save_path)
             
@@ -541,6 +540,7 @@ def Kd_fn_full(kernel_fn, X, Q):
 
 def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=None, Y=None, save_dir=None):
     N = len(X)
+    print(f'N/max_length: {N} and {max_length}')
     max_length = min(N, max_length)
     if dppmap_type == 'dppmap':
         Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)

@@ -965,7 +965,7 @@ def compute_lm_outputs(
             output['log_prob_sum'].append(all_logps_sum[0].detach().cpu())
             output['log_prob_rejected'].append(all_logps_avg[1].detach().cpu())
             output['log_prob_sum_rejected'].append(all_logps_sum[1].detach().cpu())
-        elif encode_fn_type == ['sft', 'output']:
+        elif encode_fn_type in ['sft', 'output']:
             output['log_prob'].append(-outputs['loss'].detach().cpu())
             output['log_prob_sum'].append((-outputs['loss']*(batch['labels'][:, 1:] != 100).sum(-1).squeeze()).detach().cpu())
             # el2n scores
