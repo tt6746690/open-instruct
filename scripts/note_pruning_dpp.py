@@ -476,10 +476,10 @@ def torch_dppmap_memefficient(Ki_fn,
         total_mem_avail = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         if total_mem_use < .8*total_mem_avail:
             print(f'[torch_dppmap_memefficient] Do everything on GPU since total_mem_use={total_mem_use:.2f}GB < total_mem_avail={total_mem_avail:.2f}GB')
-        device = 'cuda'
-    else:
-        # if does not fit, then put cis on cpu memory.
-        device = 'cpu'
+            device = 'cuda'
+        else:
+            # if does not fit, then put cis on cpu memory.
+            device = 'cpu'
 
     if save_dir is not None:
         state_save_path = os.path.join(save_dir, 'DppMapState.pkl')
@@ -520,9 +520,9 @@ def torch_dppmap_memefficient(Ki_fn,
         # Kj = K[j, :]
         Kj = Ki_fn(j, device='cuda')
         # (N,) - (k,)@(k,N) / (,) -> (N,)
-        eis = (Kj - (ci_optimal@state.cis[:k, :]).to(device)) / di_optimal
+        eis = (Kj - (ci_optimal@state.cis[:k, :]).to('cuda')) / di_optimal
         # update to k are updated.
-        state.cis[k, :] = eis.to('cpu')
+        state.cis[k, :] = eis.to(device)
         state.di2s -= torch.square(eis)
         state.di2s = torch.clamp(state.di2s, min=jitter) # clamp because sometimes -eis^2 may make di2s negative.
         state.di2s[j] = 1e-20 # instead of -float('inf') 
@@ -597,7 +597,7 @@ def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=None, Y=None, save_
     if dppmap_type == 'dppmap':
         Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=X)
         Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=X)
-        if N <= 50_000: # don't need to save for small datasets. since can finish  <6hrs.
+        if N*max_length <= 50_000*50_000: # don't need to save for small datasets. since can finish  <6hrs.
             save_freq = 100_000_000
         else:
             save_freq = max(int(max_length//10), 5_000)
@@ -880,8 +880,8 @@ def compute_dppmap(
 def plt_dppmap_results(N, Y, inds, marginal_gains, quality_scores, theta, save_dir, run_name, max_length):
 
     inds = inds.copy()
-    marginal_gains = marginal_gains.copy()
-    quality_scores = quality_scores.copy()
+    marginal_gains = np.array(marginal_gains.copy())
+    quality_scores = np.array(quality_scores.copy())
 
     M = len(inds)
 
@@ -907,7 +907,6 @@ def plt_dppmap_results(N, Y, inds, marginal_gains, quality_scores, theta, save_d
     ax = axs[1]
     for k, ys in d.items():
         ys = np.array(ys)[xs]
-        print(k, ys)
         ax.plot(xs, ys, label=k)
     ax.set_ylabel(f'γ={theta}')
     ax.set_xlabel('Iterations')
