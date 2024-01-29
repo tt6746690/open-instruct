@@ -750,6 +750,16 @@ def compute_dppmap(
 
     if quality_score_type is None:
         Q = torch.ones([1], device=device).expand(len(X))
+    elif quality_score_type == 'alpagasus_rating':
+        if 'alpaca' not in dataset:
+            raise ValueError(f'dataset={dataset} not supported for {quality_score_type}. only support alpaca')
+        dsq = get_dataset(dataset+'_with_rating')
+        Q = np.array(dsq['rating'])
+        Q[Q==-1] = 0 # some -1 entry, remove
+        Q += 1 # some 0 entries, add 1 to [1, ..., 6]
+        # after processing:
+        # Counter({5.0: 29070, 4.5: 10402, 5.5: 8864, 4.0: 1491, 3.0: 97, 3.5: 54, 6.0: 11, 1.0: 11})
+        Q = torch.from_numpy(Q).to(device)
     else:
         model_name = get_full_model_name(quality_score_embed_model)
         curriculum_scores_path = os.path.join(curriculum_dir, model_name, dataset, quality_score_type, 'scores.pkl')
@@ -775,9 +785,6 @@ def compute_dppmap(
                 Q = dq[quality_score_type]
         Q = torch.from_numpy(Q).to(device)
     Q = Q.reshape(-1)
-
-    # alpha = theta / (2*(max(1-theta, 1e-5)))
-    # Q = torch.exp(alpha*Q)
 
     if Y is not None:
         Y = torch.from_numpy(Y.reshape(-1)).to(device)

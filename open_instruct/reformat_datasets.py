@@ -352,10 +352,17 @@ def convert_stanford_alpaca_data(data_dir, output_dir, num_examples=None, max_se
     """
     os.makedirs(output_dir, exist_ok=True)
     target_filename = f"{dataset_name}_data.jsonl"
+    print(target_filename)
 
     examples = []
     with open(os.path.join(data_dir, "alpaca_data.json"), "r") as fin:
         examples.extend(json.load(fin))
+
+    # add alpagasus score 
+    with open(os.path.join(os.path.dirname(data_dir),  'alpagasus/alpaca_rating_52k.json'), "r") as fin:
+        ratings = [x['score'] for x in json.load(fin)]
+    [x.update({'alpagasus_rating': ratings[i]}) for i,x in enumerate(examples)]
+        
     if num_examples:
         random.seed(0)
         examples = random.sample(examples, k=min(int(num_examples*1.1), len(examples)))
@@ -374,7 +381,8 @@ def convert_stanford_alpaca_data(data_dir, output_dir, num_examples=None, max_se
             "messages": [
                 {"role": "user", "content": encoded_example["prompt"]},
                 {"role": "assistant", "content": encoded_example["completion"]},
-            ]
+            ],
+            "alpagasus_rating": example['alpagasus_rating'],
         }
     examples = [convert_example_to_messages(x, i) for i, x in enumerate(examples)]
     if max_seq_length is not None:

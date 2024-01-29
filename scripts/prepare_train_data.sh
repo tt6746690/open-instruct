@@ -157,6 +157,9 @@ wget -P data/raw_train/hard_coded/ https://beaker.org/api/v3/datasets/01HBS14BBV
 
 echo "Downloading the Alpagasus dataset..."
 wget -P data/raw_train/alpagasus https://raw.githubusercontent.com/gpt4life/alpagasus/main/data/filtered/chatgpt_9k.json
+wget -P data/raw_train/alpagasus https://raw.githubusercontent.com/gpt4life/alpagasus/main/data/rating/alpaca_rating_52k.json
+
+
 
 
 ## preference dataset

@@ -504,6 +504,16 @@ def compute_ranking_numtoks(sort_by, dataset, model_name):
     return Sd
 
 
+def compute_ranking_alpagasus_rating(sort_by, dataset):
+    if 'stanford_alpaca' not in dataset:
+        raise ValueError(f'dataset={dataset} does not contain alpagasus rating')
+    from note_pruning_analysis import get_dataset
+    ds = get_dataset(dataset+'_with_rating')
+    S = np.array(ds['rating'])
+    return {sort_by: S}
+
+
+
 sort_by_that_overwrites_model_name = [
     'kmeans',
     'semdedup',
@@ -542,7 +552,7 @@ def check_md_and_model_name_match(sort_by, model_name):
             raise ValueError(f'md={md} does not match with model_name={model_name}')
 
 
-    
+
 def main(dataset, sort_by, save_dir, model_name, overwrite):
 
     check_md_and_model_name_match(sort_by, model_name)
@@ -570,6 +580,8 @@ def main(dataset, sort_by, save_dir, model_name, overwrite):
         Sd = compute_ranking_rho(sort_by, dataset, model_name)
     elif sort_by.startswith('numtoks'):
         Sd = compute_ranking_numtoks(sort_by, dataset, model_name)
+    elif sort_by.startswith('alpagasus_rating'):
+        Sd = compute_ranking_alpagasus_rating(sort_by, dataset)
     elif sort_by.startswith('kmeans'):
         Sd, pkl_extra = compute_ranking_kmeans_dist_to_centroids(sort_by, dataset)
     elif sort_by.startswith('semdedup'):
