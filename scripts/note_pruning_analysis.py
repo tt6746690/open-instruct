@@ -957,6 +957,23 @@ def count_repeating_substrings(s, length=3):
     return substring_counts
 
 
+def compute_alpacaeval_numtoks():
+    """mean, median: 127.84844720496895 95.0 """
+    import datasets
+    from note_pruning_analysis import get_tokenizer_name_or_path, get_fast_tokenizer
+    import numpy as np
+
+    tokenizer_name_or_path = get_tokenizer_name_or_path('llama-7b')
+    tokenizer = get_fast_tokenizer(tokenizer_name_or_path)
+    alpaca_eval_data = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval", trust_remote_code=True)["eval"]
+    def fn(example):
+        output = tokenizer(example['output'])
+        return {'len': len(output['input_ids'])}
+    alpaca_eval_data = alpaca_eval_data.map(fn, num_proc=8)
+    L = np.array(alpaca_eval_data['len'])
+    print(np.mean(L), np.median(L))
+
+
 def compute_win_rate(preference):
     preference = np.array([x for x in preference if x is not None])
     n_wins = np.sum(preference == 2.)
