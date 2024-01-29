@@ -418,6 +418,7 @@ def get_dataset_token_lengths(dataset, tokenizer, inds=None, num_proc=128, max_s
 def get_lm_output(dataset, model_name, encode_fn_type='sft', return_text_embedding=True, fill_nan=True):
     """`model_name` is name of directory under `model_outputs`. """
     save_path = os.path.join(lm_output_dir, encode_fn_type, model_name, f'{dataset}.pkl')
+    print(save_path)
 
     if os.path.isfile(save_path):
         with open(save_path, 'rb') as f:

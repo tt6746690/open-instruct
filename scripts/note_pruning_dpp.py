@@ -438,7 +438,9 @@ class DppMapState:
     inds: list[int] = field(default_factory=list)
     cis: torch.Tensor = field(default=None)
     di2s: torch.Tensor = field(default=None)
-    marginal_gains: list = field(default_factory=list) # extra, keep track of objective
+    # extra, keep track of objective. actually this is just di2s=det(L_S), to get real marginal gain, take log
+    marginal_gains: list = field(default_factory=list)
+    quality_scores: list = field(default_factory=list)
         
 
 def torch_dppmap_memefficient(Ki_fn,
@@ -446,7 +448,11 @@ def torch_dppmap_memefficient(Ki_fn,
                               N,
                               M,
                               J=None,
+                              Q=None,
+                              device='auto',
+                              theta=0.,
                               epsilon=1e-10,
+                              jitter=1e-20,
                               verbose=True,
                               save_dir=None,
                               save_freq=None):
@@ -460,6 +466,20 @@ def torch_dppmap_memefficient(Ki_fn,
     """
     if J is not None and len(J) < M:
         raise ValueError(f'len(J)={len(J)} < M={M}')
+    if Q is None or len(Q) != N:
+        raise ValueError(f'Q is None or len(Q)={len(Q)} != N={N} not allowed')
+    has_Q = theta != 0.
+
+    if device == 'auto':
+        # memory of cis (NM), di2s (N), and cost of getting 1 row of X (ND) to compute kernel
+        total_mem_use = N*(4096+M+2)*4/(1024**3)
+        total_mem_avail = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        if total_mem_use < .8*total_mem_avail:
+            print(f'[torch_dppmap_memefficient] Do everything on GPU since total_mem_use={total_mem_use:.2f}GB < total_mem_avail={total_mem_avail:.2f}GB')
+        device = 'cuda'
+    else:
+        # if does not fit, then put cis on cpu memory.
+        device = 'cpu'
 
     if save_dir is not None:
         state_save_path = os.path.join(save_dir, 'DppMapState.pkl')
@@ -468,20 +488,27 @@ def torch_dppmap_memefficient(Ki_fn,
 
     if not os.path.isfile(state_save_path):
         state = DppMapState()
-        state.cis = torch.zeros((M, N), dtype=torch.float32)
-        state.di2s = Kd_fn()
+        state.cis = torch.zeros((M, N), dtype=torch.float32).to(device)
+        state.di2s = Kd_fn(device='cuda')
         if J is None:
-            j = torch.argmax(state.di2s).item()
+            if has_Q:
+                gain = theta*torch.log(Q+jitter) + (1-theta)*torch.log(state.di2s+jitter)
+            else:
+                gain = state.di2s
+            j = torch.argmax(gain).item()
         else:
             j = J[0]
         state.inds.append(j)
         state.marginal_gains.append(state.di2s[j].item())
+        state.quality_scores.append(Q[j].item() if has_Q else 0.)
         start_iteration = 0
     else:
         with open(state_save_path, 'rb') as f:
             state = pickle.load(f)
         j = state.inds[-1]
         start_iteration = len(state.inds)-1
+        state.cis = state.cis.to(device)
+        state.di2s = state.di2s.to('cuda')
         print(f'Continuing from start_iteration={start_iteration}')
 
     pbar = tqdm(range(start_iteration, M-1), initial=start_iteration)
@@ -491,15 +518,20 @@ def torch_dppmap_memefficient(Ki_fn,
         ci_optimal = state.cis[:k, j]
         di_optimal = torch.sqrt(state.di2s[j])
         # Kj = K[j, :]
-        Kj = Ki_fn(j)
+        Kj = Ki_fn(j, device='cuda')
         # (N,) - (k,)@(k,N) / (,) -> (N,)
-        eis = (Kj - ci_optimal@state.cis[:k, :]) / di_optimal
+        eis = (Kj - (ci_optimal@state.cis[:k, :]).to(device)) / di_optimal
         # update to k are updated.
-        state.cis[k, :] = eis
+        state.cis[k, :] = eis.to('cpu')
         state.di2s -= torch.square(eis)
-        state.di2s[j] = -float('inf')
+        state.di2s = torch.clamp(state.di2s, min=jitter) # clamp because sometimes -eis^2 may make di2s negative.
+        state.di2s[j] = 1e-20 # instead of -float('inf') 
         if J is None:
-            j = torch.argmax(state.di2s).item()
+            if has_Q:
+                gain = theta*torch.log(Q+jitter) + (1-theta)*torch.log(state.di2s+jitter)
+            else:
+                gain = state.di2s
+            j = torch.argmax(gain).item()
         else:
             j = J[k+1]
 
@@ -509,43 +541,67 @@ def torch_dppmap_memefficient(Ki_fn,
             break
         state.inds.append(j)
         state.marginal_gains.append(state.di2s[j].item())
+        state.quality_scores.append(Q[j].item() if has_Q else 0.)
 
         if save_dir is not None and save_freq is not None and (k+1) % save_freq == 0:
             print(f'Save DppMapState at iteration {k} to {state_save_path}')
             with open(state_save_path, 'wb') as f:
                 pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
-        pbar.set_postfix({'di^2: ': state.marginal_gains[-1]})
+            print(f"Save gain/quality data to disk")
+            data = {'inds': state.inds,
+                    'marginal_gains': state.marginal_gains,
+                    'quality_scores': state.quality_scores}
+            with open(os.path.join(save_dir, 'data.pkl'), 'wb') as f:
+                pickle.dump(data, f)
+
+        postfix_dict = {
+            'di^2|det(L_S)': state.marginal_gains[-1],
+            'logdet(L_S)': np.log(state.marginal_gains[-1] + jitter),
+        }
+        if has_Q:
+            postfix_dict.update({
+                'q': state.quality_scores[-1],
+                'log(q)': np.log(state.quality_scores[-1] + jitter),
+                'γ·log(q)+(1-γ)·logdet(L_S)': (
+                    theta*np.log(state.quality_scores[-1] + jitter)+(1-theta)*np.log(state.marginal_gains[-1] + jitter)
+                        if has_Q else np.log(state.marginal_gains[-1] + jitter)
+                ) if J is None else J[k+1],
+            })
+        postfix_str = ",  ".join([f'{k}={v:.5f}' for k, v in postfix_dict.items()])
+        pbar.set_description(postfix_str)
+
 
     if save_dir is not None and M < 70_000: # try to keep dppmapstate for these long runs just in case.
         if os.path.isfile(state_save_path):
             os.remove(state_save_path)
             
-    return state.inds, state.marginal_gains
+    return state.inds, state.marginal_gains, state.quality_scores
 
 
-def Ki_fn_full(i, kernel_fn, X, Q):
-    Si = kernel_fn(X[i], X)
-    Ki = Q[i] * Si * Q
-    Ki = Ki.reshape(-1).to('cpu')
+def Ki_fn_full(i, kernel_fn, X, device='cpu'):
+    Ki = kernel_fn(X[i], X)
+    Ki = Ki.reshape(-1).to(device)
     return Ki
 
 
-def Kd_fn_full(kernel_fn, X, Q):
+def Kd_fn_full(kernel_fn, X, device='cpu'):
     Kd = torch.stack([kernel_fn(X[i], X[i]) for i in range(len(X))])
-    Kd = Kd.reshape(-1)
-    Kd = Kd * Q**2
-    Kd = Kd.reshape(-1).to('cpu')
+    Kd = Kd.reshape(-1).to(device)
     return Kd
 
 
-def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=None, Y=None, save_dir=None):
+def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=None, Y=None, save_dir=None, theta=0.):
+    """theta=0 means just consider quality. """
     N = len(X)
-    print(f'N/max_length: {N} and {max_length}')
     max_length = min(N, max_length)
     if dppmap_type == 'dppmap':
-        Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
-        Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=X, Q=Q)
-        output = torch_dppmap_memefficient(Ki_fn, Kd_fn, N, max_length, J=J, verbose=True, save_dir=save_dir, save_freq=max(int(max_length//10), 5_000))
+        Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=X)
+        Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=X)
+        if N <= 50_000: # don't need to save for small datasets. since can finish  <6hrs.
+            save_freq = 100_000_000
+        else:
+            save_freq = max(int(max_length//10), 5_000)
+        output = torch_dppmap_memefficient(Ki_fn, Kd_fn, N, max_length, J=J, Q=Q, theta=theta, verbose=True, save_dir=save_dir, save_freq=save_freq)
     elif dppmap_type == 'dppmapbd': # block diagonal
         clusters = sorted(list(torch.unique(Y).cpu().numpy()))
         inds_list = []
@@ -560,10 +616,10 @@ def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=None, Y=None, save_
             Ni = Xi.shape[0]
             if Ni <= 10: continue
             Mi = min(Ni, max_length) # max_length, just take all 
-            Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=Xi, Q=Qi)
-            Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=Xi, Q=Qi)
+            Ki_fn = partial(Ki_fn_full, kernel_fn=kernel_fn, X=Xi)
+            Kd_fn = partial(Kd_fn_full, kernel_fn=kernel_fn, X=Xi)
             inds, marginal_gains = torch_dppmap_memefficient(
-                Ki_fn, Kd_fn, Ni, Mi, J=Ji, verbose=True)
+                Ki_fn, Kd_fn, Ni, Mi, J=Ji, Q=Qi, theta=theta, verbose=True)
             inds = inds_global[np.array(inds)].tolist()
             inds_list += inds
             marginal_gains_list += marginal_gains
@@ -621,16 +677,20 @@ def compute_dppmap(
     """
         Memory usage:
         ```
-        gpu_mem_fn = lambda N, D: N*(D+1)*4/(1024**3)
-        cpu_mem_fn = lambda N, M, D: N*(M+1)*4/(1024**3)
+        gpu_mem_fn = lambda N, D: N*(D+1)*4/(1024**3) # 1 row of X & Q
+        cpu_mem_fn = lambda N, M, D: N*(M+1)*4/(1024**3) # cis & di2s
+        total_mem_fn = lambda N, M, D: N*(D+M+2)*4/(1024**3)
         for N, M, D in [
             (100_000,  10_000, 4096),
-            (1500_000, 10_000, 4096),
-            (1500_000, 20_000, 4096),
+            (50_000,  50_000, 4096),
+            (300_000,  100_000, 4096),
         ]:
             print(f'[D={D}, {N:7} ->{M:6}]\t'
-                f'gpu_mem = {gpu_mem_fn(N, D):5.2f}GB\tcpu_mem = {cpu_mem_fn(N, M, D):5.2f}GB')
+                f'gpu_mem = {gpu_mem_fn(N, D):5.2f}GB\tcpu_mem = {cpu_mem_fn(N, M, D):5.2f}GB\ttotal_mem = {total_mem_fn(N, M, D):5.2f}GB')
         ```
+        [D=4096,  100000 -> 10000]	gpu_mem =  1.53GB	cpu_mem =  3.73GB	total_mem =  5.25GB
+        [D=4096,   50000 -> 50000]	gpu_mem =  0.76GB	cpu_mem =  9.31GB	total_mem = 10.08GB
+        [D=2048,  300000 ->100000]	gpu_mem =  2.29GB	cpu_mem = 111.76GB	total_mem = 114.05GB
     """
     
     if dppmap_type not in ['dppmap', 'dppmapbd']:
@@ -690,35 +750,34 @@ def compute_dppmap(
 
     if quality_score_type is None:
         Q = torch.ones([1], device=device).expand(len(X))
-    elif quality_score_type.startswith('ifd'):
-        Q = get_ifd_and_pmi(dataset, get_full_model_name(quality_score_embed_model))['ifd']
-        if 'neg' in quality_score_type:
-            Q = -Q
-        Q = normalize_to_unit_interval(Q)
-        Q = torch.from_numpy(Q).to(device)
-    elif quality_score_type.startswith('log_pmi'): # higher is better!
-        Q = get_ifd_and_pmi(dataset, get_full_model_name(quality_score_embed_model))['log_pmi']
-        if 'neg' in quality_score_type:
-            Q = -Q
-        Q = normalize_to_unit_interval(Q)
-        Q = torch.from_numpy(Q).to(device)
     else:
-        dq = get_lm_output(
-            dataset, 
-            get_full_model_name(quality_score_embed_model),
-            encode_fn_type=get_encode_fn_type(quality_score_embed_model, dataset),
-            return_text_embedding=True)
-        if quality_score_type == 'prob':
-            Q = dq['log_prob']
-            Q = np.exp(Q)
+        model_name = get_full_model_name(quality_score_embed_model)
+        curriculum_scores_path = os.path.join(curriculum_dir, model_name, dataset, quality_score_type, 'scores.pkl')
+        if os.path.isfile(curriculum_scores_path):
+            Q = get_curriculum_scores(curriculum_scores_path)['scores']
+            if Q.min() < 0:
+                raise ValueError(f'Quality score {quality_score_type} has negative entries: {Q}')
         else:
-            if quality_score_type not in dq:
-                raise ValueError(f'quality_score_type={quality_score_type} not pre-computed {dq.keys()}')
-            Q = dq[quality_score_type]
+            print(f'Provided quality_score_type={quality_score_type} and quality_score_embed_model={quality_score_embed_model}.\n'
+                  f'Cannot find the scores in {curriculum_scores_path}\n'
+                  f'Resort to reading scores directly from model output.')
+            dq = get_lm_output(
+                dataset, 
+                get_full_model_name(quality_score_embed_model),
+                encode_fn_type=get_encode_fn_type(quality_score_embed_model, dataset),
+                return_text_embedding=True)
+            if quality_score_type == 'prob':
+                Q = dq['log_prob']
+                Q = np.exp(Q)
+            else:
+                if quality_score_type not in dq:
+                    raise ValueError(f'quality_score_type={quality_score_type} not pre-computed {dq.keys()}')
+                Q = dq[quality_score_type]
         Q = torch.from_numpy(Q).to(device)
     Q = Q.reshape(-1)
-    alpha = theta / (2*(max(1-theta, 1e-5)))
-    Q = torch.exp(alpha*Q)
+
+    # alpha = theta / (2*(max(1-theta, 1e-5)))
+    # Q = torch.exp(alpha*Q)
 
     if Y is not None:
         Y = torch.from_numpy(Y.reshape(-1)).to(device)
@@ -749,6 +808,7 @@ def compute_dppmap(
         if x is not None:
             if x.shape[0] != N:
                 raise ValueError(f'{k}.shape[0]={x.shape[0]} != N={N}')
+            
 
     info = {
         'N': N,
@@ -768,13 +828,14 @@ def compute_dppmap(
     os.makedirs(save_dir, exist_ok=True)
 
     t0 = time.time()
-    inds, marginal_gains = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=J, Y=Y, save_dir=save_dir)
+    inds, marginal_gains, quality_scores = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=J, Y=Y, save_dir=save_dir, theta=theta)
     info['M'] = len(inds)
     info["time_elapsed"] = time.time()-t0
 
     data = {}
-    data['marginal_gains'] = marginal_gains
     data['inds'] = inds
+    data['marginal_gains'] = marginal_gains
+    data['quality_scores'] = quality_scores
 
     with open(os.path.join(save_dir, 'info.json'), 'w') as f:
         json.dump(info, f, ensure_ascii=False, indent=4)
@@ -782,7 +843,7 @@ def compute_dppmap(
     with open(os.path.join(save_dir, 'data.pkl'), 'wb') as f:
         pickle.dump(data, f)
 
-    plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_length)
+    plt_dppmap_results(N, Y, inds, marginal_gains, quality_scores, theta, save_dir, run_name, max_length)
     plt_subset_size_vs_kernel_params(dataset) # update the subset size vs. kernel hyperparameter trend plot.
 
 
@@ -816,32 +877,47 @@ def compute_dppmap(
 
 
 
-def plt_dppmap_results(N, Y, inds, marginal_gains, save_dir, run_name, max_length):
+def plt_dppmap_results(N, Y, inds, marginal_gains, quality_scores, theta, save_dir, run_name, max_length):
 
     inds = inds.copy()
     marginal_gains = marginal_gains.copy()
+    quality_scores = quality_scores.copy()
 
     M = len(inds)
 
     ## plot how marginal gain decays vs. iterations
-    spacings = 1000
+    spacings = max(500, N//100)
     fig, axs = plt.subplots(2,1,figsize=(12,6), sharex=True)
-    ys = marginal_gains
-    xs = list(range(0, len(marginal_gains), spacings))
-    ys = marginal_gains[::spacings]
-    for i in range(2):
-        ax = axs[i]
-        ax.plot(xs, ys, label=run_name)
-        ax.set_xlim((0, N))
-        if i == 1:
-            ax.set_yscale('log')
-        ax.set_ylabel('Marginal Gain (dᵢ^2)')
-        ax.set_xlabel('Iterations')
+    xs = np.array(list(range(0, len(marginal_gains), spacings)))
+    d = {
+        'di2s': marginal_gains,
+        'q': quality_scores,
+    }
+    ax = axs[0]
+    for k, ys in d.items():
+        ys = np.array(ys)[xs]
+        ax.plot(xs, ys, label=k)
+    ax.set_xlabel('Iterations')
+    ax.legend()
+    d = {
+        'log(di2s)': np.log(marginal_gains+1e-20),
+        'log(q)': np.log(quality_scores+1e-20),
+        'γ·log(q)+(1-γ)·logdet(L_S)': theta*np.log(quality_scores+1e-20)+(1-theta)*np.log(marginal_gains+1e-20),
+    }
+    ax = axs[1]
+    for k, ys in d.items():
+        ys = np.array(ys)[xs]
+        print(k, ys)
+        ax.plot(xs, ys, label=k)
+    ax.set_ylabel(f'γ={theta}')
+    ax.set_xlabel('Iterations')
+    ax.legend()
     fig.suptitle(run_name)
     fig.tight_layout()
     save_path = os.path.join(save_dir, f'fig_dppmap_marginal_gain_vs_iterations.png')
     fig.savefig(save_path, bbox_inches='tight', dpi=100)
     plt.close()
+
 
     ## subsequent plots requires `Y` to be provided
     if Y is None: 
