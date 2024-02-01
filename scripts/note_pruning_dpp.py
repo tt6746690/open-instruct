@@ -600,7 +600,7 @@ def torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=None, Y=None, save_
         if N*max_length <= 50_000*50_000: # don't need to save for small datasets. since can finish  <6hrs.
             save_freq = 100_000_000
         else:
-            save_freq = max(int(max_length//10), 5_000)
+            save_freq = max(int(max_length//30), 5_000)
         output = torch_dppmap_memefficient(Ki_fn, Kd_fn, N, max_length, J=J, Q=Q, theta=theta, verbose=True, save_dir=save_dir, save_freq=save_freq)
     elif dppmap_type == 'dppmapbd': # block diagonal
         clusters = sorted(list(torch.unique(Y).cpu().numpy()))
@@ -765,6 +765,8 @@ def compute_dppmap(
         curriculum_scores_path = os.path.join(curriculum_dir, model_name, dataset, quality_score_type, 'scores.pkl')
         if os.path.isfile(curriculum_scores_path):
             Q = get_curriculum_scores(curriculum_scores_path)['scores']
+            if quality_score_type == 'grad_loraB_l2n_neg':  # convert negative number to positive nuimber via exp. after conversion somewhat nicely distributed in log space.
+                Q = np.clip(np.exp(Q), a_min=1e-8, a_max=None)
             if Q.min() < 0:
                 raise ValueError(f'Quality score {quality_score_type} has negative entries: {Q}')
         else:
@@ -785,6 +787,7 @@ def compute_dppmap(
                 Q = dq[quality_score_type]
         Q = torch.from_numpy(Q).to(device)
     Q = Q.reshape(-1)
+    print(f'Q min, 5% quantil,e 50% quantile, 95% quantile, max: {Q.min().item():.2f}, {torch.quantile(Q, .05).item():.2f}, {torch.quantile(Q, .5).item():.2f}, {torch.quantile(Q, .95).item():.2f}, {Q.max().item():.2f}')
 
     if Y is not None:
         Y = torch.from_numpy(Y.reshape(-1)).to(device)
