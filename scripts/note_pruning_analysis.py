@@ -971,6 +971,7 @@ def compute_alpacaeval_numtoks():
         return {'len': len(output['input_ids'])}
     alpaca_eval_data = alpaca_eval_data.map(fn, num_proc=8)
     L = np.array(alpaca_eval_data['len'])
+    print(f"alpacaeval_output_lens={alpaca_eval_data['len']}")
     print(np.mean(L), np.median(L))
 
 
@@ -984,19 +985,42 @@ def compute_win_rate(preference):
     return win_rate
 
 
+
+alpacaeval_output_lens = np.array([90, 123, 114, 105, 163, 174, 117, 58, 85, 452, 95, 125, 288, 47, 87, 119, 131, 109, 42, 148, 40, 48, 56, 160, 15, 67, 34, 111, 86, 105, 268, 181, 127, 17, 18, 56, 197, 61, 201, 83, 20, 145, 93, 50, 72, 70, 78, 226, 31, 150, 16, 21, 212, 190, 222, 84, 200, 290, 182, 80, 456, 183, 140, 146, 363, 169, 120, 458, 133, 53, 35, 16, 118, 99, 86, 127, 248, 380, 77, 175, 50, 88, 204, 39, 236, 335, 130, 102, 31, 86, 168, 20, 368, 12, 312, 88, 104, 9, 108, 55, 404, 8, 48, 214, 187, 11, 217, 158, 115, 148, 330, 224, 42, 2, 82, 433, 219, 168, 10, 38, 22, 17, 22, 58, 105, 25, 93, 93, 27, 294, 395, 48, 70, 31, 262, 85, 390, 136, 397, 251, 124, 127, 20, 13, 6, 249, 176, 96, 748, 11, 11, 199, 105, 764, 172, 92, 1050, 100, 15, 2, 99, 45, 242, 81, 8, 95, 81, 73, 10, 29, 307, 528, 18, 72, 21, 104, 733, 344, 35, 304, 369, 64, 396, 184, 103, 6, 165, 163, 277, 80, 5, 200, 90, 255, 111, 10, 140, 16, 65, 2, 30, 132, 151, 632, 236, 317, 418, 17, 344, 95, 2, 3, 96, 75, 128, 142, 193, 241, 73, 250, 378, 306, 82, 177, 31, 23, 136, 106, 699, 374, 37, 177, 3, 114, 45, 282, 95, 164, 47, 146, 346, 104, 33, 261, 91, 4, 148, 113, 477, 16, 209, 149, 146, 110, 122, 149, 108, 89, 150, 50, 147, 78, 2, 390, 18, 812, 16, 110, 4, 209, 227, 218, 27, 122, 208, 161, 375, 87, 160, 732, 70, 151, 160, 352, 601, 37, 31, 167, 107, 260, 111, 115, 24, 93, 313, 57, 28, 72, 463, 164, 307, 102, 82, 40, 216, 120, 164, 68, 97, 107, 201, 28, 110, 127, 14, 184, 77, 43, 35, 260, 235, 114, 165, 63, 233, 96, 99, 95, 157, 26, 51, 488, 12, 3, 137, 146, 548, 119, 95, 29, 13, 95, 168, 222, 131, 88, 67, 101, 99, 22, 10, 112, 44, 149, 274, 97, 44, 105, 411, 7, 215, 190, 2, 267, 53, 59, 14, 75, 90, 367, 10, 8, 103, 149, 163, 11, 46, 44, 24, 492, 70, 108, 172, 120, 89, 12, 136, 53, 23, 11, 171, 39, 134, 93, 240, 121, 220, 333, 39, 345, 72, 58, 7, 60, 8, 153, 90, 96, 34, 64, 201, 109, 141, 125, 265, 146, 41, 52, 72, 4, 34, 211, 127, 14, 14, 143, 274, 180, 70, 67, 69, 267, 66, 164, 318, 172, 35, 52, 22, 16, 73, 65, 119, 45, 24, 221, 30, 41, 4, 72, 181, 184, 199, 112, 114, 58, 158, 29, 16, 83, 56, 11, 10, 103, 172, 66, 75, 94, 140, 50, 807, 9, 80, 16, 29, 32, 55, 20, 116, 92, 58, 67, 181, 75, 173, 15, 102, 168, 59, 19, 144, 51, 58, 79, 18, 21, 182, 164, 66, 70, 65, 74, 118, 56, 206, 78, 125, 62, 62, 10, 70, 190, 120, 25, 106, 114, 56, 211, 84, 159, 73, 267, 227, 72, 174, 26, 103, 50, 41, 204, 64, 122, 90, 285, 78, 180, 76, 14, 177, 164, 26, 64, 37, 104, 244, 18, 90, 165, 119, 7, 255, 111, 8, 177, 85, 43, 181, 146, 119, 167, 94, 336, 65, 36, 4, 105, 67, 86, 119, 126, 60, 174, 196, 170, 115, 64, 325, 113, 77, 134, 316, 165, 199, 205, 158, 114, 397, 61, 70, 359, 82, 97, 172, 134, 87, 42, 152, 5, 19, 37, 12, 138, 49, 60, 331, 389, 76, 180, 16, 146, 70, 93, 4, 12, 47, 168, 2, 26, 237, 95, 23, 279, 6, 15, 41, 60, 10, 11, 17, 18, 21, 5, 25, 88, 41, 13, 4, 2, 4, 4, 15, 69, 149, 28, 91, 127, 39, 90, 112, 60, 226, 12, 126, 133, 75, 135, 3, 2, 12, 115, 24, 21, 9, 8, 153, 76, 13, 3, 7, 24, 3, 57, 31, 25, 16, 46, 101, 5, 24, 24, 32, 37, 294, 29, 126, 68, 326, 54, 68, 217, 72, 29, 88, 16, 106, 348, 111, 31, 6, 6, 23, 92, 9, 46, 31, 3, 200, 4, 3, 24, 230, 4, 88, 11, 4, 13, 2, 4, 33, 95, 6, 92, 82, 18, 59, 143, 211, 112, 209, 108, 127, 192, 254, 159, 251, 372, 211, 187, 124, 139, 412, 180, 158, 196, 190, 48, 41, 153, 77, 134, 116, 108, 104, 232, 257, 95, 93, 95, 85, 91, 153, 104, 109, 84, 70, 331, 147, 235, 185, 335, 336, 311, 245, 304, 328, 117, 105, 127, 92, 91, 110, 87, 82, 78, 79, 222, 323, 88, 281, 274, 140, 335, 4, 5, 13, 185, 207, 259, 255, 131, 291, 262, 235, 289, 253])
+
+
+def compute_win_rate_adjust_by_output_tok_length(preference, output_tok_length):
+    """win-rate adjusted by length for each example.
+        originally each win has weight 1.
+        now weight by 
+            `reference model output length / model output length`
+        don't need to adjust for repetition, since in that case this number will be very small.
+    """
+
+    ref_vs_model_len_ratio = alpacaeval_output_lens / output_tok_length
+    preference = np.array(preference)
+    n_wins = np.sum(ref_vs_model_len_ratio[preference==2.])
+    n_wins_base = np.sum(ref_vs_model_len_ratio[preference==1.])
+    n_draws = np.sum(ref_vs_model_len_ratio[preference==0.])
+    n_total = n_wins + n_wins_base + n_draws
+    win_rate = (n_wins/n_total + .5*n_draws/n_total)
+    
+    return win_rate
+
 def update_metrics_with_highly_repeated_chars(
         save_dir,
         num_repeated_substr_threshold=100,
         repeated_str_len=3, 
         update_metrics_file=False,
-        num_proc=1):
+        num_proc=1,
+    ):
     """Update `metrics.json` in alpacaeval with 
             - percentage counts of highly repeated generations.
             - win-rate adjusted for repetitive outputs (always give base model a win). 
             
         ```
         import glob
-        from note_pruning_analysis import update_metrics_with_highly_repeated_chars
+        from note_pruning_analysis import update_metrics_with_highly_repeated_chars, count_repeating_substrings
         save_dirs = glob.glob('results/*/*/eval/alpacafarm*/')
         save_dirs = glob.glob('results/baselines/*/*/eval/alpacafarm*/')
         from tqdm import tqdm
@@ -1062,6 +1086,7 @@ def update_metrics_with_highly_repeated_chars(
         'output_1_highlyrepeated': np.sum(ds['output_1_highlyrepeated'])/len(ds) * 100,
         'output_2_highlyrepeated': np.sum(ds['output_2_highlyrepeated'])/len(ds) * 100,
         'win_rate_repetition_adjusted': compute_win_rate(ds['preference_repetition_adjusted']) * 100,
+        'win_rate_adjusted_by_tok_length': compute_win_rate_adjust_by_output_tok_length(ds['preference'], ds['output_2_tok_length']) * 100,
         'output_2_tok_length_median': np.median(ds['output_2_tok_length']),
         'output_2_tok_length_adjusted': np.mean([x for x in ds['output_2_tok_length_adjusted'] if x!=-1]),
     }

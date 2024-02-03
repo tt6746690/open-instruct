@@ -100,6 +100,7 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
         max_length = 100_000
     else:
         max_length = 55_000
+        # max_length = 1_000
 
     prespecified_ordering = re.sub(':', '_', re.sub('@', '=', kvs['ord'])) if 'ord' in kvs else None
     if prespecified_ordering:

@@ -555,6 +555,7 @@ def torch_dppmap_memefficient(Ki_fn,
                 pickle.dump(data, f)
 
         postfix_dict = {
+            'j': j,
             'di^2|det(L_S)': state.marginal_gains[-1],
             'logdet(L_S)': np.log(state.marginal_gains[-1] + jitter),
         }
@@ -767,6 +768,8 @@ def compute_dppmap(
             Q = get_curriculum_scores(curriculum_scores_path)['scores']
             if quality_score_type == 'grad_loraB_l2n_neg':  # convert negative number to positive nuimber via exp. after conversion somewhat nicely distributed in log space.
                 Q = np.clip(np.exp(Q), a_min=1e-8, a_max=None)
+            if quality_score_type == 'log_prob': # log_prob=-loss<0 in log space already. so just take exp here.
+                Q = np.clip(np.exp(Q), a_min=1e-8, a_max=None)
             if Q.min() < 0:
                 raise ValueError(f'Quality score {quality_score_type} has negative entries: {Q}')
         else:
@@ -787,6 +790,7 @@ def compute_dppmap(
                 Q = dq[quality_score_type]
         Q = torch.from_numpy(Q).to(device)
     Q = Q.reshape(-1)
+    Q = Q.to(torch.float32)
     print(f'Q min, 5% quantil,e 50% quantile, 95% quantile, max: {Q.min().item():.2f}, {torch.quantile(Q, .05).item():.2f}, {torch.quantile(Q, .5).item():.2f}, {torch.quantile(Q, .95).item():.2f}, {Q.max().item():.2f}')
 
     if Y is not None:
