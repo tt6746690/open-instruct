@@ -1040,12 +1040,21 @@ def update_metrics_with_highly_repeated_chars(
     tokenizer_name_or_path = get_tokenizer_name_or_path('llama-7b')
     tokenizer = get_fast_tokenizer(tokenizer_name_or_path)
 
-    ann_file = os.path.join(save_dir, 'annotations.json')
     metrics_file = os.path.join(save_dir, 'metrics.json')
-
-    if not (os.path.isfile(ann_file) and os.path.isfile(metrics_file)):
-        print(f'ann_file={ann_file} or metrics_file={metrics_file} does not exist, skip.')
+    if not os.path.isfile(metrics_file):
+        print(f'metrics_file={metrics_file} does not exist, skip.')
         return (None, None)
+    
+    ann_file = os.path.join(save_dir, 'annotations.json')
+    if not os.path.isfile(ann_file):
+        print(f'ann_file={ann_file} does not exist.')
+        ann_files = glob.glob(os.path.join(save_dir, "*", 'annotations.json'))
+        if len(ann_files) == 1:
+            ann_file = ann_files[0]
+            print(f'=1 ann_files found in sub-directories. ann_file={ann_file}')
+        else:
+            print('>1 ann_files found. ann_files={ann_files}')
+            return (None, None)
 
     with open(ann_file, 'r') as f:
         data = json.load(f)

@@ -91,13 +91,16 @@ def main(args):
             fout.write(json.dumps(example) + "\n")
             model_results.append(example)
 
+    # wpq: alpaca-eval 2.0 creates annotator in subdir. but if set 
+    os.makedirs(os.path.join(args.save_dir, args.annotators_config), exist_ok=True)
+
     df_leaderboard, annotations = alpaca_farm_evaluate(
         model_outputs=model_results,
         reference_outputs=args.reference_path if args.reference_path != 'alpaca_eval_data' else alpaca_eval_data,
         annotators_config=args.annotators_config,
         output_path=args.save_dir,
         is_return_instead_of_print=True,
-        caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
+        caching_path=os.path.join(args.save_dir, args.annotators_config, "alpaca_eval_annotator_cache.json"),
         precomputed_leaderboard=None,
         is_cache_leaderboard=False
     )
