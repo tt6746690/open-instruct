@@ -780,7 +780,7 @@ def get_tokenizer_name_or_path(model_name):
             scripts_dir, 'results', 'baselines', 'codellama/CodeLlama-7b-hf')
     elif model_name.startswith('mistral-7b'):
         tokenizer_name_or_path = os.path.join(
-            scripts_dir, 'results', 'baselines', 'mistralai/Mistral-7B-Instruct-v0.1')
+            scripts_dir, 'results', 'baselines', 'mistralai/Mistral-7B-v0.1')
     elif model_name.startswith('llama2-7b'):
         tokenizer_name_or_path = os.path.join(
             scripts_dir, 'results', 'baselines', 'NousResearch/Llama-2-7b-hf')
@@ -836,6 +836,8 @@ def filter_examples_by_numtoks(examples, tokenizer_name='llama', num_proc=64, ma
         tokenizer_name_or_path = get_tokenizer_name_or_path('llama-7b')
     elif tokenizer_name.startswith('codellama'):
         tokenizer_name_or_path = get_tokenizer_name_or_path('codellama-7b')
+    elif tokenizer_name.startswith('mistral'):
+        tokenizer_name_or_path = get_tokenizer_name_or_path('mistral-7b')
     else:
         raise ValueError(f'Unknown tokenizer_name={tokenizer_name}')
 
@@ -1212,6 +1214,7 @@ md_to_model_name.update({
     'llama7br256p4096': 'llama-7b+lora:r=256:a=4096+proj=4096',
     'llama7br512p4096': 'llama-7b+lora:r=512:a=11585+proj=4096',
     'pythia1br512p4096': 'pythia-1b+lora:r=512:a=11585+proj=4096',
+    'mistral7br512p4096': 'mistral-7b+lora:r=512:a=11585+proj=4096'
 })
 
 # randsphere baselines 

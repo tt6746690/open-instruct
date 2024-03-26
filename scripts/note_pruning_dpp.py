@@ -797,10 +797,20 @@ def compute_dppmap(
         Y = torch.from_numpy(Y.reshape(-1)).to(device)
 
     if prespecified_ordering is not None:
-        model_name = get_full_model_name(kernel_embed_model)
+        from rosemary import parse_kv_from_string
+        # since `kmd` in prespecified ordering might be mpnet etc. so need to parse it out.
+        # if md/kmd not specified, assume it is the same as kernel_embed_model
+        kvs = parse_kv_from_string(prespecified_ordering)
+        if 'md' in kvs:
+            md = kvs['md']
+        elif 'kmd' in kvs:
+            md = kvs['kmd']
+        else:
+            md = kernel_embed_model
+        model_name = get_full_model_name(md)
         curriculum_scores = os.path.join(curriculum_dir, model_name, dataset, prespecified_ordering, 'scores.pkl')
         if not os.path.isfile(curriculum_scores):
-            raise ValueError(f'curriculum_scores={curriculum_scores} does not exists!')
+            raise ValueError(f'fetch ordering {prespecified_ordering} but curriculum_scores={curriculum_scores} does not exists!')
         output = get_curriculum_scores(curriculum_scores)
         scores = output['scores']
         J = np.argsort(scores).tolist()
@@ -820,8 +830,8 @@ def compute_dppmap(
 
     for k, x in {'X': X, 'Q': Q, 'Y': Y, 'J': J}.items():
         if x is not None:
-            if x.shape[0] != N:
-                raise ValueError(f'{k}.shape[0]={x.shape[0]} != N={N}')
+            if len(x) != N:
+                raise ValueError(f'{k}.shape[0]={len(x)} != N={N}')
             
 
     info = {
