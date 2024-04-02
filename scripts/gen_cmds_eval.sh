@@ -1,2 +1,5 @@
 set -e
 set -x
+CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_farm.run_eval --reference_path alpaca_eval_data --model_name_or_path "results/oi3/mistral-7b_stanford_alpaca50k_ep=3_lr=2e-06" --max_new_tokens 2048 --save_dir "results/oi3/mistral-7b_stanford_alpaca50k_ep=3_lr=2e-06/eval/alpacafarm_ann=weighted:alpaca:eval:gpt4:turbo_chatfmt" --eval_batch_size 10 --annotators_config weighted_alpaca_eval_gpt4_turbo --use_vllm --use_chat_format --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format --use_slow_tokenizer --torch_dtype bfloat16
+
+CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_farm.run_eval --reference_path alpaca_eval_data --model_name_or_path "results/oi3/mistral-7b_stanford_alpaca50k_ep=3_lr=4e-06" --max_new_tokens 2048 --save_dir "results/oi3/mistral-7b_stanford_alpaca50k_ep=3_lr=4e-06/eval/alpacafarm_ann=weighted:alpaca:eval:gpt4:turbo_chatfmt" --eval_batch_size 10 --annotators_config weighted_alpaca_eval_gpt4_turbo --use_vllm --use_chat_format --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format --use_slow_tokenizer --torch_dtype bfloat16
