@@ -458,10 +458,11 @@ def random_uniform_hypersphere_surface(N, D):
 
 
 
-def generate_randsphere_model_output(dataset, D, model_name='randspherep4096', encode_fn_type='sft', embed_type='grad_rp_loraB'):
+def generate_randsphere_model_output(dataset_or_N, D, model_name='randspherep4096', encode_fn_type='sft', embed_type='grad_rp_loraB', seed=0):
     """Generate uniformlys sampled points on hypersphere surface
         to `model_outputs` under `randsphere`
-
+        
+        ## as reference dataset to compare between datasets.
         ```
         from note_pruning_analysis import generate_randsphere_model_output
         dataset_list = [
@@ -471,17 +472,47 @@ def generate_randsphere_model_output(dataset, D, model_name='randspherep4096', e
             generate_randsphere_model_output(dataset, 4096, model_name='randspherep4096', encode_fn_type='sft', embed_type='grad_rp_loraB')
             generate_randsphere_model_output(dataset, 768, model_name='randspherep768', encode_fn_type='input', embed_type='text_embedding')
         ```
-    """
-    ds = get_dataset(dataset)
-    N = len(ds)
 
-    np.random.seed(0)
+        ## for measuring randomness from seed
+        ```
+        from note_pruning_analysis import generate_randsphere_model_output
+        dataset_list = [
+            'flan_v2', # ~100k data
+        ]
+
+        for dataset in dataset_list:
+            for seed in [0,1,2]:
+                generate_randsphere_model_output(dataset, 4096, model_name=f'randspherep4096s{seed}', encode_fn_type='sft', embed_type='grad_rp_loraB', seed=seed)
+                generate_randsphere_model_output(dataset, 768, model_name=f'randspherep768s{seed}', encode_fn_type='input', embed_type='text_embedding', seed=seed)
+        ```
+        
+        ## for computing time efficiency of DPP MAP
+        ```
+        Ns = [10_000, 50_000, 100_000]
+        Ds = [256, 1024, 4096]
+        
+        for N in Ns:
+            for D in Ds:
+                print(N, D)
+                generate_randsphere_model_output(N, D, model_name=f'randspherep{D}', encode_fn_type='sft', embed_type='grad_rp_loraB')
+        ```
+    """
+    if isinstance(dataset_or_N, int):
+        N = dataset_or_N
+        save_filename = f'Ref_N={N}.pkl'
+    else:
+        dataset = dataset_or_N
+        ds = get_dataset(dataset)
+        N = len(ds)
+        save_filename = f'{dataset}.pkl'
+
+    np.random.seed(seed)
     X = random_uniform_hypersphere_surface(N, D)
     X = X.astype(np.float32)
 
     save_dir = os.path.join(lm_output_dir, encode_fn_type, model_name)
     os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, f'{dataset}.pkl')
+    save_path = os.path.join(save_dir, save_filename)
     with open(save_path, 'wb') as f:
         output = {
             embed_type: X,
@@ -1221,6 +1252,14 @@ md_to_model_name.update({
 md_to_model_name.update({
     'randspherep4096': 'randspherep4096',
     'randspherep768': 'randspherep768',
+    'randspherep1024': 'randspherep1024',
+    'randspherep256': 'randspherep256',
+    # for measuring randomnessin ldd
+    'randspherep4096s0': 'randspherep4096s0',
+    'randspherep4096s1': 'randspherep4096s1',
+    'randspherep4096s2': 'randspherep4096s2',
+    'randspherep4096s3': 'randspherep4096s3',
+    'randspherep4096s4': 'randspherep4096s4',
 })
 
 # preference data
