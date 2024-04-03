@@ -97,7 +97,7 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
     if dataset == 'ultrachat15':
         max_length = 20_000
     elif dataset == 'mix_all50k':
-        max_length = 100_000
+        max_length = 20_000
     else:
         max_length = 55_000
         # max_length = 1_000
@@ -117,7 +117,7 @@ def parse_sort_by_and_compute_dppmap(sort_by, dataset):
         
 
     kwargs = {
-        'dppmap_type': 'dppmap',
+        'dppmap_type': kvs[0],
         'dataset': dataset,
         'kernel_type': kvs['k'],
         'kernel_embed_model': kvs['kmd'],
@@ -520,6 +520,7 @@ sort_by_that_overwrites_model_name = [
     'semdedup',
     'dedup',
     'dppmap',
+    'fl',
 ]
 
 
@@ -589,7 +590,7 @@ def main(dataset, sort_by, save_dir, model_name, overwrite):
         Sd = compute_ranking_semdedup(sort_by, dataset)
     elif sort_by.startswith('dedup'):
         Sd = compute_ranking_dedup(sort_by, dataset)
-    elif sort_by.startswith('dppmap_'):
+    elif sort_by.startswith(('dppmap_', 'fl')):
         Sd, pkl_extra = compute_ranking_dppmap(sort_by, dataset)
     elif sort_by.startswith('dppmapbd'):
         Sd, pkl_extra = compute_ranking_dppmapbd(sort_by, dataset)

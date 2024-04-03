@@ -474,11 +474,12 @@ def torch_dppmap_memefficient(Ki_fn,
         # memory of cis (NM), di2s (N), and cost of getting 1 row of X (ND) to compute kernel
         total_mem_use = N*(4096+M+2)*4/(1024**3)
         total_mem_avail = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        if total_mem_use < .8*total_mem_avail:
+        if total_mem_use < .9*total_mem_avail:
             print(f'[torch_dppmap_memefficient] Do everything on GPU since total_mem_use={total_mem_use:.2f}GB < total_mem_avail={total_mem_avail:.2f}GB')
             device = 'cuda'
         else:
             # if does not fit, then put cis on cpu memory.
+            print(f'[torch_dppmap_memefficient] Put cis on CPU memory since total_mem_use={total_mem_use:.2f}GB > total_mem_avail={total_mem_avail:.2f}GB')
             device = 'cpu'
 
     if save_dir is not None:
@@ -657,6 +658,14 @@ def normalize_to_unit_interval(Q, quantile_to_0=0.01, quantile_to_1=0.99):
     return Q
 
 
+def unique_inds(arr):
+    seen = {}
+    inds = []
+    for i, num in enumerate(arr):
+        if num not in seen:
+            inds.append(i)
+            seen[num] = True
+    return np.array(inds)
 
 
 def compute_dppmap(
@@ -691,10 +700,10 @@ def compute_dppmap(
         ```
         [D=4096,  100000 -> 10000]	gpu_mem =  1.53GB	cpu_mem =  3.73GB	total_mem =  5.25GB
         [D=4096,   50000 -> 50000]	gpu_mem =  0.76GB	cpu_mem =  9.31GB	total_mem = 10.08GB
-        [D=2048,  300000 ->100000]	gpu_mem =  2.29GB	cpu_mem = 111.76GB	total_mem = 114.05GB
-    """
-    
-    if dppmap_type not in ['dppmap', 'dppmapbd']:
+        [D=4096,  300000 ->100000]	gpu_mem =  4.58GB	cpu_mem = 111.76GB	total_mem = 116.34GB
+        [D=4096,  300000 -> 50000]	gpu_mem =  4.58GB	cpu_mem = 55.88GB	total_mem = 60.46GB
+    """    
+    if dppmap_type not in ['dppmap', 'dppmapbd', 'fl']:
         raise ValueError(f'dppmap_type={dppmap_type} not supported.')
 
     if kernel_type == 'vmf':
@@ -848,11 +857,37 @@ def compute_dppmap(
         'max_length': max_length,
         'rand_proj': rand_proj,
     }
-    save_dir = os.path.join(scripts_dir, 'dpp', dataset, run_name)
-    os.makedirs(save_dir, exist_ok=True)
+    objective_type = 'dpp' if dppmap_type.startswith('dpp') else dppmap_type
+    save_dir = os.path.join(scripts_dir, objective_type, dataset, run_name)
+    os.makedirs(save_dir, mode=0o777, exist_ok=True) # for ccc stuff since there are two users...
 
     t0 = time.time()
-    inds, marginal_gains, quality_scores = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=J, Y=Y, save_dir=save_dir, theta=theta)
+    if dppmap_type.startswith('dpp'):
+        inds, marginal_gains, quality_scores = torch_dppmap(dppmap_type, X, Q, kernel_fn, max_length, J=J, Y=Y, save_dir=save_dir, theta=theta)
+    elif dppmap_type == 'fl':
+        if J is not None:
+            raise ValueError('facility location. prespecified ordering not implemented')
+        def compute_kernel_on_gpu(kernel_fn, X):
+            if isinstance(X, np.ndarray):
+                X = torch.from_numpy(X)
+            X = X.to(device)
+            K = kernel_fn(X, X) # assume \in [0,1]
+            K = K.to('cpu').numpy()
+            return K
+        D = compute_kernel_on_gpu(kernel_fn, X)
+        from apricot import FacilityLocationSelection
+        selector = FacilityLocationSelection(min(max_length, N), metric='precomputed', optimizer='two-stage', verbose=True)
+        selector.fit(D)
+        inds = selector.ranking
+        print(f'facility location: inds before dedup: {len(inds)}')
+        unique_inds_of_inds = unique_inds(inds)
+        inds = list(inds[unique_inds_of_inds])
+        print(f'facility location: inds after dedup: {len(inds)}')
+        marginal_gains = selector.gains[unique_inds_of_inds] # similar to dpp's setup, not in log space!
+        quality_scores = Q.to('cpu').numpy()[inds]
+    else:
+        raise ValueError(f'dppmap_type={dppmap_type} not valid')
+
     info['M'] = len(inds)
     info["time_elapsed"] = time.time()-t0
 
@@ -868,7 +903,7 @@ def compute_dppmap(
         pickle.dump(data, f)
 
     plt_dppmap_results(N, Y, inds, marginal_gains, quality_scores, theta, save_dir, run_name, max_length)
-    plt_subset_size_vs_kernel_params(dataset) # update the subset size vs. kernel hyperparameter trend plot.
+    plt_subset_size_vs_kernel_params(dataset, objective_type=objective_type) # update the subset size vs. kernel hyperparameter trend plot.
 
 
     ## Need to convert `inds` from subset of `X` (if N!=NX) index space to the original X's index space.
@@ -910,8 +945,8 @@ def plt_dppmap_results(N, Y, inds, marginal_gains, quality_scores, theta, save_d
     M = len(inds)
 
     ## plot how marginal gain decays vs. iterations
-    spacings = max(500, N//100)
-    fig, axs = plt.subplots(2,1,figsize=(12,6), sharex=True)
+    spacings = 10
+    fig, axs = plt.subplots(3,1,figsize=(6*3,9), sharex=True)
     xs = np.array(list(range(0, len(marginal_gains), spacings)))
     d = {
         'di2s': marginal_gains,
@@ -924,11 +959,22 @@ def plt_dppmap_results(N, Y, inds, marginal_gains, quality_scores, theta, save_d
     ax.set_xlabel('Iterations')
     ax.legend()
     d = {
+        'log(di2s)': np.log(marginal_gains+1e-10),
+        'log(q)': np.log(quality_scores+1e-10),
+    }
+    ax = axs[1]
+    for k, ys in d.items():
+        ys = np.array(ys)[xs]
+        ax.scatter(xs, ys, label=k)
+    ax.set_ylabel(f'γ={theta}')
+    ax.set_xlabel('Iterations')
+    ax.legend()
+    d = {
         'log(di2s)': np.log(marginal_gains+1e-20),
         'log(q)': np.log(quality_scores+1e-20),
         'γ·log(q)+(1-γ)·logdet(L_S)': theta*np.log(quality_scores+1e-20)+(1-theta)*np.log(marginal_gains+1e-20),
     }
-    ax = axs[1]
+    ax = axs[2]
     for k, ys in d.items():
         ys = np.array(ys)[xs]
         ax.plot(xs, ys, label=k)
@@ -1010,7 +1056,7 @@ def plt_dppmap_results(N, Y, inds, marginal_gains, quality_scores, theta, save_d
 
 
 
-def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sort_by='dppmap_*', hlines=[1_000, 2_000, 10_000], normalize_by_dataset_size=False, interpolate=True):
+def plt_subset_size_vs_kernel_params(dataset, objective_type='dpp', save_fig=True, filter_fn=None, sort_by='dppmap_*', hlines=[1_000, 2_000, 10_000], normalize_by_dataset_size=False, interpolate=True):
     """Plot how subse size varies with kernel hyperparameters.
         ```
         from note_pruning_dpp import plt_subset_size_vs_kernel_params
@@ -1057,6 +1103,9 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sor
         'wizardlm': 143_000,
         'starcoder_commentinstrv5': 57_290,
     }
+
+    if dataset not in list(dataset_sizes.keys()):
+        return
 
     if isinstance(dataset, list):
         df_list = []
@@ -1142,7 +1191,7 @@ def plt_subset_size_vs_kernel_params(dataset, save_fig=True, filter_fn=None, sor
 
 
     if save_fig:
-        save_path = os.path.join(scripts_dir, 'dpp', dataset, f'fig_dppmap_subset_size_vs_kernel_params.png')
+        save_path = os.path.join(scripts_dir, objective_type, dataset, f'fig_dppmap_subset_size_vs_kernel_params.png')
         fig.savefig(save_path, bbox_inches='tight', dpi=100)
         plt.close()
 

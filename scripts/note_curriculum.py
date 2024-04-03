@@ -272,7 +272,10 @@ def generate_curriculum_forall_scoring_fn(
         display(df)
     output_list = []
     for path, pacing_fn in itertools.product(paths, pacing_fn_list):
-        output = generate_curriculum(path, pacing_fn, verbose=verbose)
+        try:
+            output = generate_curriculum(path, pacing_fn, verbose=verbose)
+        except Exception as e:
+            print(e)
         if output is None: continue
         output_list.append(output)
     return output_list
